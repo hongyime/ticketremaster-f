@@ -67,6 +67,7 @@ stitch_exports/
 .vercel
 .env*
 
+
 # AI / editor dot directories (managed via sourcerepo)
 .*
 !.github/
