@@ -1,4 +1,5 @@
-import { test, expect } from '@playwright/test'
+import type { Page, BrowserContext } from '@playwright/test'
+import { test, expect } from './setup/fixtures'
 
 const buyerPendingFixture = {
   transferId: 'trf-buyer-001',
@@ -45,12 +46,13 @@ const completionCacheItem = {
 }
 
 async function seedAuthSession(
-  context: any,
+  context: BrowserContext,
   userId = 'buyer-001',
   role: 'user' | 'admin' | 'staff' = 'user',
 ) {
   await context.addInitScript(
     ({ sessionUserId, sessionRole }) => {
+      if (location.origin !== 'http://127.0.0.1:43187') return
       sessionStorage.removeItem('ticketremaster_demo_mode')
       sessionStorage.removeItem('demo_access_token')
       sessionStorage.removeItem('demo_user')
@@ -73,7 +75,7 @@ async function seedAuthSession(
   )
 }
 
-async function navigateInApp(page: any, path: string) {
+async function navigateInApp(page: Page, path: string) {
   await page.evaluate((nextPath) => {
     window.history.pushState({}, '', nextPath)
     window.dispatchEvent(new PopStateEvent('popstate'))
@@ -84,21 +86,21 @@ test.describe('Frontend UX Fixes Coverage', () => {
   test('seller pending transfer is discoverable in notifications when seller OTP is ready', async ({ page, context }) => {
     await seedAuthSession(context, 'seller-001', 'user')
 
-    await page.route('**/credits/balance*', (route) =>
+    await page.route('https://ticketremasterapi.invalid/credits/balance*', (route) =>
       route.fulfill({
         status: 200,
         contentType: 'application/json',
         body: JSON.stringify({ data: { creditBalance: 410 } }),
       }),
     )
-    await page.route('**/transfer/pending*', (route) =>
+    await page.route('https://ticketremasterapi.invalid/transfer/pending*', (route) =>
       route.fulfill({
         status: 200,
         contentType: 'application/json',
         body: JSON.stringify({ data: { transfers: [sellerPendingFixture] } }),
       }),
     )
-    await page.route('**/transfer/my-pending*', (route) =>
+    await page.route('https://ticketremasterapi.invalid/transfer/my-pending*', (route) =>
       route.fulfill({
         status: 200,
         contentType: 'application/json',
@@ -117,21 +119,21 @@ test.describe('Frontend UX Fixes Coverage', () => {
   test('buyer pending transfer is discoverable in notifications', async ({ page, context }) => {
     await seedAuthSession(context, 'buyer-001', 'user')
 
-    await page.route('**/credits/balance*', (route) =>
+    await page.route('https://ticketremasterapi.invalid/credits/balance*', (route) =>
       route.fulfill({
         status: 200,
         contentType: 'application/json',
         body: JSON.stringify({ data: { creditBalance: 350 } }),
       }),
     )
-    await page.route('**/transfer/pending*', (route) =>
+    await page.route('https://ticketremasterapi.invalid/transfer/pending*', (route) =>
       route.fulfill({
         status: 200,
         contentType: 'application/json',
         body: JSON.stringify({ data: { transfers: [] } }),
       }),
     )
-    await page.route('**/transfer/my-pending*', (route) =>
+    await page.route('https://ticketremasterapi.invalid/transfer/my-pending*', (route) =>
       route.fulfill({
         status: 200,
         contentType: 'application/json',
@@ -149,6 +151,7 @@ test.describe('Frontend UX Fixes Coverage', () => {
   test('buyer sees transfer completion notification from session cache', async ({ page, context }) => {
     await context.addInitScript(
       ({ cacheItem }) => {
+      if (location.origin !== 'http://127.0.0.1:43187') return
         sessionStorage.removeItem('ticketremaster_demo_mode')
         sessionStorage.removeItem('demo_access_token')
         sessionStorage.removeItem('demo_user')
@@ -171,21 +174,21 @@ test.describe('Frontend UX Fixes Coverage', () => {
       { cacheItem: completionCacheItem },
     )
 
-    await page.route('**/credits/balance*', (route) =>
+    await page.route('https://ticketremasterapi.invalid/credits/balance*', (route) =>
       route.fulfill({
         status: 200,
         contentType: 'application/json',
         body: JSON.stringify({ data: { creditBalance: 350 } }),
       }),
     )
-    await page.route('**/transfer/pending*', (route) =>
+    await page.route('https://ticketremasterapi.invalid/transfer/pending*', (route) =>
       route.fulfill({
         status: 200,
         contentType: 'application/json',
         body: JSON.stringify({ data: { transfers: [] } }),
       }),
     )
-    await page.route('**/transfer/my-pending*', (route) =>
+    await page.route('https://ticketremasterapi.invalid/transfer/my-pending*', (route) =>
       route.fulfill({
         status: 200,
         contentType: 'application/json',
@@ -245,21 +248,21 @@ test.describe('Frontend UX Fixes Coverage', () => {
 
     let emitPending = false
 
-    await context.route('**/credits/balance*', (route) =>
+    await context.route('https://ticketremasterapi.invalid/credits/balance*', (route) =>
       route.fulfill({
         status: 200,
         contentType: 'application/json',
         body: JSON.stringify({ data: { creditBalance: 350 } }),
       }),
     )
-    await context.route('**/transfer/pending*', (route) =>
+    await context.route('https://ticketremasterapi.invalid/transfer/pending*', (route) =>
       route.fulfill({
         status: 200,
         contentType: 'application/json',
         body: JSON.stringify({ data: { transfers: [] } }),
       }),
     )
-    await context.route('**/transfer/my-pending*', (route) =>
+    await context.route('https://ticketremasterapi.invalid/transfer/my-pending*', (route) =>
       route.fulfill({
         status: 200,
         contentType: 'application/json',
@@ -278,4 +281,25 @@ test.describe('Frontend UX Fixes Coverage', () => {
     await expect(page.getByRole('heading', { name: 'Buyer OTP Ready' })).toBeVisible()
     await expect(page.locator('.icon-count')).toContainText('1')
   })
+})
+
+
+test('staff scanner falls back after a camera permission failure', async ({ page }) => {
+  await page.addInitScript(() => {
+    if (location.origin !== 'http://127.0.0.1:43187') return
+    Object.assign(window, { __cameraRequests: 0 })
+    Object.defineProperty(navigator, 'mediaDevices', { configurable: true, value: {
+      enumerateDevices: async () => [{ kind: 'videoinput', deviceId: 'fixture-camera', label: 'Synthetic camera', groupId: 'fixture' }],
+      getUserMedia: async () => { (window as any).__cameraRequests++; throw new DOMException('Synthetic permission denial', 'NotAllowedError') },
+    } })
+  })
+  await page.goto('/demo-login')
+  await page.getByRole('button', { name: /Demo Staff/ }).click()
+  await expect(page).toHaveURL('/staff/scan')
+  await page.locator('select').first().selectOption('ven_001')
+  await page.locator('select').nth(1).selectOption({ index: 1 })
+  await page.getByRole('button', { name: /Confirm selection/ }).click()
+  await expect(page.getByRole('heading', { name: 'Use manual verification on this device.' })).toBeVisible()
+  await expect(page.getByPlaceholder('Ticket ID')).toBeEnabled()
+  expect(await page.evaluate(() => (window as any).__cameraRequests)).toBe(1)
 })

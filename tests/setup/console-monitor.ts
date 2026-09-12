@@ -1,154 +1,43 @@
-/**
- * Browser Console Monitor for Playwright Tests
- *
- * This module provides utilities for monitoring browser console errors during tests.
- * It captures console errors, page errors, and Vue warnings, failing tests if
- * unexpected errors occur.
- */
+import type { BrowserContext } from '@playwright/test'
 
-import type { Page, ConsoleMessage } from '@playwright/test'
+type BrowserMessage = { type: string; message: string; url: string }
 
-/**
- * Console error types that should be tracked
- */
-export interface ConsoleError {
-  type: 'console' | 'pageerror' | 'vue-warning'
-  message: string
-  timestamp: number
-}
-
-/**
- * List of known/acceptable console messages that should not fail tests
- */
-const ALLOWED_CONSOLE_PATTERNS = [
-  /Sentry is enabled in development mode/,
-  /PostHog is enabled in development mode/,
-  /\[HMR\]/, // Hot module replacement messages
-  /\[vue-router\]/, // Vue router debug messages in dev
-  /Sentry Logger \[error\]/, // Sentry internal errors (expected when offline)
-  /\[PostHog\.js\]/, // PostHog internal errors (expected when offline)
-  /Failed to fetch/, // Network errors when backend is offline
-  /Network Error/, // Axios network errors
-  /ERR_FAILED/, // Chrome network errors
-  /ERR_INTERNET_DISCONNECTED/, // Offline mode test errors
-  /ERR_CONNECTION_REFUSED/, // Backend offline connection errors
-  /ERR_NAME_NOT_RESOLVED/, // DNS resolution errors
-  /CORS policy/, // CORS errors when backend is unavailable
-  /403/, // Forbidden errors from CDN/external resources
-  /408/, // Request timeout errors
-  /429/, // Rate limit errors
-  /503/, // Service unavailable errors
-  /504/, // Gateway timeout errors
-  /abort/, // Aborted requests
-  /Failed to load resource/, // Resource loading failures
-  /API error/, // API client error logs
-  /status code/, // HTTP status code errors
-  /Retry attempt/, // API client retry logs
-  /SecurityError/, // localStorage access issues in some contexts
-  /vue-barcode-reader/, // Barcode reader component warnings
-  /ResizeObserver loop/, // ResizeObserver harmless warnings
-  /NotAllowedError/, // Camera permission errors (staff scanner)
-  /NotFoundError.*getUserMedia/, // Camera not found (headless)
-  /NotSupportedError/, // Camera/media not supported in headless
-  /^Not supported$/, // Bare "Not supported" from camera API in headless
-  /AxiosError/, // Axios error objects logged to console
-  /Request failed with status code/, // Axios HTTP error messages
-  /Backend unavailable/, // Expected demo mode message
-  /@sentry\/vue.*Misconfigured SDK/, // Sentry not fully configured in test env
-  /Vue Router warn.*next\(\).*deprecated/, // Vue Router deprecation warning (expected)
-  /WebGL/, // WebGL GPU performance warnings
-  /GL Driver Message/, // GPU driver messages
-  /Misconfigured SDK/, // Sentry SDK configuration warnings
-  /navigation guards is deprecated/, // Vue Router next() callback deprecation
-  /Stripe\.js integration over HTTP/, // Stripe test environment warning
-  /live Stripe\.js integrations must use HTTPS/, // Stripe test environment warning
-  /\[Vue warn\]/, // Vue component warnings during test mocking
-  /WebSocket connection to .*socket\.io/, // Socket endpoint can be unavailable in local E2E
-  /\[WebSocket\] Connection error/, // Expected when remote websocket is unreachable
-  /Unexpected response code: 530/, // Cloudflare handshake failure in test env
-]
-
-/**
- * Check if a console message should be allowed (not fail the test)
- */
-function isAllowedMessage(message: string): boolean {
-  return ALLOWED_CONSOLE_PATTERNS.some(pattern => pattern.test(message))
-}
-
-/**
- * Collected errors for the current test
- */
-const collectedErrors: ConsoleError[] = []
-
-/**
- * Setup console monitoring for a page
- * Call this in beforeEach to capture errors during test execution
- */
-export function setupConsoleMonitoring(page: Page | undefined): void {
-  // Clear any previous errors
-  collectedErrors.length = 0
-
-  // Guard against undefined page
-  if (!page) {
-    console.warn('setupConsoleMonitoring: page is undefined, skipping console monitoring setup')
-    return
+// Scope allowances to observed synthetic API failures. JavaScript exceptions,
+// Vue warnings and local asset errors are never covered by a broad allowlist.
+export function monitorConsole(context: BrowserContext) {
+  const messages: BrowserMessage[] = []
+  let failedApiRequest = false
+  const loadedAssets = new Set<string>()
+  const isApi = (url: string) => {
+    try { return new URL(url).origin === 'https://ticketremasterapi.invalid' } catch { return false }
   }
-
-  // Monitor console messages
-  page.on('console', (msg: ConsoleMessage) => {
-    const text = msg.text()
-    const type = msg.type()
-
-    // Only track errors and warnings
-    if (type === 'error' || type === 'warning') {
-      if (!isAllowedMessage(text)) {
-        collectedErrors.push({
-          type: 'console',
-          message: `[${type.toUpperCase()}] ${text}`,
-          timestamp: Date.now(),
-        })
-      }
-    }
+  context.on('response', response => {
+    if (isApi(response.url()) && response.status() >= 400) failedApiRequest = true
+    if (response.ok() && /^http:\/\/127\.0\.0\.1:43187\/assets\/[^?#]+\.(?:js|css)$/.test(response.url())) loadedAssets.add(response.url())
   })
-
-  // Monitor page errors (unhandled exceptions)
-  page.on('pageerror', (error: Error) => {
-    const message = error.message || String(error)
-    if (!isAllowedMessage(message)) {
-      collectedErrors.push({
-        type: 'pageerror',
-        message: `[PAGE ERROR] ${message}`,
-        timestamp: Date.now(),
-      })
-    }
+  context.on('requestfailed', request => { if (isApi(request.url())) failedApiRequest = true })
+  context.on('page', page => {
+    page.on('pageerror', error => messages.push({ type: 'exception', message: error.message, url: page.url() }))
+    page.on('console', message => {
+      if (message.type() === 'error' || message.type() === 'warning') messages.push({ type: message.type(), message: message.text(), url: message.location().url })
+    })
   })
-}
-
-/**
- * Get all collected console errors
- */
-export function getCollectedErrors(): ConsoleError[] {
-  return [...collectedErrors]
-}
-
-/**
- * Clear collected errors
- */
-export function clearCollectedErrors(): void {
-  collectedErrors.length = 0
-}
-
-/**
- * Assert that no console errors occurred during the test
- * Call this in afterEach to fail the test if there are errors
- */
-export function assertNoConsoleErrors(): void {
-  if (collectedErrors.length > 0) {
-    const errorMessages = collectedErrors
-      .map(e => `  - ${e.type}: ${e.message}`)
-      .join('\n')
-    throw new Error(
-      `Browser console errors detected during test:\n${errorMessages}`
-    )
+  // WebKit may report delayed module preloads under CPU load. Retain these
+  // advisory timings in the report; failed assets and runtime warnings still fail.
+  const isPreloadAdvisory = (item: BrowserMessage) => {
+    const match = /^The resource (http:\/\/127\.0\.0\.1:43187\/assets\/[^ ]+\.(?:js|css)) was preloaded using link preload but not used within a few seconds from the window's load event\. Please make sure it wasn't preloaded for nothing\.$/.exec(item.message)
+    return item.type === 'warning' && !!match && loadedAssets.has(match[1]!)
   }
+  return { advisories: () => messages.filter(isPreloadAdvisory), errors: () => messages.filter(item => {
+    if (item.type === 'exception') return true
+    if (isPreloadAdvisory(item)) return false
+    if (item.message === 'Service Worker registration blocked by Playwright') return false
+    if (failedApiRequest && /^API (?:error|request rejected)\b/.test(item.message)) return false
+    if (failedApiRequest && /^(?:AxiosError|Error: Request failed with status code)/.test(item.message)) return false
+    const corsResource = /^\[JavaScript Error: "Cross-Origin Request Blocked: The Same Origin Policy disallows reading the remote resource at (https:\/\/\S+)\. \(Reason: CORS request did not succeed\)\. Status code: \(null\)\."\]$/.exec(item.message)
+    if (failedApiRequest && corsResource && isApi(corsResource[1]!)) return false
+    const apiResource = !item.url || isApi(item.url)
+    if (failedApiRequest && apiResource && /Failed to load resource|net::ERR_|NS_ERROR_/.test(item.message)) return false
+    return true
+  }) }
 }

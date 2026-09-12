@@ -1,172 +1,70 @@
-import { test, expect } from '@playwright/test';
-import {
-    setupConsoleMonitoring,
-    assertNoConsoleErrors,
-} from './setup/console-monitor';
+import { test, expect, event } from './setup/fixtures'
+const api = 'https://ticketremasterapi.invalid'
+const events = Array.from({ length: 10 }, (_, index) => ({ ...event, eventId: `evt_${String(index + 1).padStart(3, '0')}`, name: index === 0 ? 'Taylor Swift' : `Fixture Event ${index + 1}`, eventDate: index === 0 ? '2030-06-15T10:00:00Z' : '2030-06-16T10:00:00Z' }))
 
-const API_URL = '**/ticketremasterapi.hong-yi.me/**';
+test.describe('Events Flow', () => {
+  test.beforeEach(async ({ page }) => {
+    await page.route(`${api}/events?*`, route => route.fulfill({ json: { data: { events, pagination: { total: 10, limit: 10, page: 1 } } } }))
+  })
+  test('should show events and open the selected event details', async ({ page }) => {
+    await page.goto('/events')
+    await page.locator('.event-card-feature').getByRole('button', { name: 'Get Tickets' }).click()
+    await expect(page).toHaveURL('/events/evt_001')
+    await expect(page.getByRole('heading', { level: 1 })).toHaveText('Taylor Swift')
+    await expect(page.locator('.event-page')).toContainText('National Stadium')
+    await expect(page.getByRole('button', { name: /Select.*Seat|Get Tickets|Book/i })).toBeVisible()
+  })
+  test('should show an unavailable state for a missing event (404)', async ({ page }) => {
+    await page.route(`${api}/events/missing`, route => route.fulfill({ status: 404, json: { error: { code: 'NOT_FOUND' } } }))
+    await page.goto('/events/missing')
+    await expect(page.getByRole('heading', { level: 1 })).toHaveText('We couldn’t find that event.')
+    await page.getByRole('button', { name: /Back|Browse/ }).click()
+    await expect(page).toHaveURL('/events')
+  })
+  test('should toggle the featured favorite with the keyboard without opening its event', async ({ page }) => {
+    await page.goto('/events')
+    const favorite = page.getByRole('button', { name: 'Favorite Taylor Swift', exact: true })
+    await favorite.focus()
+    await favorite.press('Enter')
+    await expect(page).toHaveURL('/events')
+    await expect(favorite).toHaveAttribute('aria-pressed', 'true')
+    expect(await page.evaluate(() => JSON.parse(localStorage.getItem('favoriteEvents')!))).toEqual(['evt_001'])
+    await page.getByRole('button', { name: 'Favorites', exact: true }).click()
+    await expect(page.locator('.event-card')).toHaveCount(1)
+    await favorite.press('Space')
+    await expect(page).toHaveURL('/events')
+    await expect(page.getByRole('heading', { name: 'No events found.' })).toBeVisible()
+  })
+  test('should filter events by an inclusive date range and clear the filter', async ({ page }) => {
+    await page.goto('/events')
+    await page.getByLabel('From date').fill('2030-06-15')
+    await page.getByLabel('To date').fill('2030-06-15')
+    await expect(page.locator('.event-card')).toHaveCount(1)
+    await expect(page.locator('.event-card')).toContainText('Taylor Swift')
+    await page.getByLabel('To date').fill('2030-06-16')
+    await expect(page.locator('.event-card')).toHaveCount(10)
+    await page.getByLabel('From date').fill('2030-06-17')
+    await expect(page.getByRole('heading', { name: 'No events found.' })).toBeVisible()
+    await page.getByLabel('From date').fill('')
+    await page.getByLabel('To date').fill('')
+    await expect(page.locator('.event-card')).toHaveCount(10)
+  })
+  test('should render every event returned for the current page', async ({ page }) => {
+    await page.goto('/events')
+    await expect(page.locator('.event-card h2, .event-card h3')).toHaveText(events.map(item => item.name))
+    await expect(page.getByRole('button', { name: 'Next', exact: true })).toHaveCount(0)
+  })
+})
 
-test.describe('Events Information', () => {
-    test.beforeEach(async ({ page }) => {
-        setupConsoleMonitoring(page);
-        await page.route('https://js.stripe.com/**', async route => {
-            await route.fulfill({ status: 200, contentType: 'application/javascript', body: '' });
-        });
-    });
 
-    test.afterEach(async () => {
-        assertNoConsoleErrors();
-    });
-
-    test('should list events and show details', async ({ page }) => {
-        const mockEvents = [{
-            eventId: 'evt_001',
-            name: 'Taylor Swift',
-            eventDate: '2026-06-15T19:00:00Z',
-            venue: { name: 'Indoor Stadium', city: 'Singapore' },
-            pricingTiers: [{ category: 'CAT1', price: 350 }]
-        }];
-
-        // Intercept ALL API calls to the backend
-        await page.route(API_URL, async route => {
-            const url = route.request().url();
-            if (url.includes('/events/evt_001') && !url.includes('/seats')) {
-                await route.fulfill({
-                    status: 200,
-                    contentType: 'application/json',
-                    body: JSON.stringify({
-                        data: {
-                            eventId: 'evt_001',
-                            name: 'Taylor Swift',
-                            eventDate: '2026-06-15T19:00:00Z',
-                            venue: { name: 'Indoor Stadium', address: '2 Stadium Walk' },
-                            type: 'concert',
-                            pricingTiers: { CAT1: 350 }
-                        }
-                    })
-                });
-            } else if (url.includes('/events')) {
-                await route.fulfill({
-                    status: 200,
-                    contentType: 'application/json',
-                    body: JSON.stringify({
-                        data: {
-                            events: mockEvents,
-                            pagination: { page: 1, totalPages: 1 }
-                        }
-                    })
-                });
-            } else {
-                await route.fulfill({ status: 200, contentType: 'application/json', body: '{}' });
-            }
-        });
-
-        await page.goto('/events', { waitUntil: 'domcontentloaded' });
-        await expect(page.locator('h3.card-title:has-text("Taylor Swift")')).toBeVisible({ timeout: 15000 });
-        await page.locator('h3.card-title:has-text("Taylor Swift")').click();
-
-        await expect(page).toHaveURL(/\/events\//, { timeout: 5000 });
-        // Wait for either the event detail or not-found state to render
-        await expect(page.locator('.event-name, .not-found, h2').first()).toBeVisible({ timeout: 15000 });
-        // If event loaded, verify meta info is present
-        const eventName = page.locator('.event-name');
-        if (await eventName.count() > 0) {
-            await expect(page.locator('.meta-item').first()).toBeVisible();
-        }
-    });
-
-    test('should handle 404 Event Not Found', async ({ page }) => {
-        await page.route(API_URL, async route => {
-            const url = route.request().url();
-            if (url.includes('/events/missing')) {
-                await route.fulfill({
-                    status: 404,
-                    contentType: 'application/json',
-                    body: JSON.stringify({ error: { code: 'EVENT_NOT_FOUND', message: 'Event not found' } })
-                });
-            } else {
-                await route.fulfill({ status: 200, contentType: 'application/json', body: '{}' });
-            }
-        });
-
-        await page.goto('/events/missing', { waitUntil: 'domcontentloaded' });
-        // The app may redirect on 404 or show an error - check for any error indication
-        await page.waitForTimeout(3000);
-        const body = await page.locator('body').textContent();
-        expect(body).toBeTruthy(); // Page should render something
-    });
-
-    test('should allow toggling favorites', async ({ page }) => {
-        await page.route(API_URL, async route => {
-            const url = route.request().url();
-            if (url.includes('/events')) {
-                await route.fulfill({
-                    status: 200,
-                    contentType: 'application/json',
-                    body: JSON.stringify({
-                        data: {
-                            events: [{ eventId: 'evt_001', name: 'Taylor Swift', eventDate: '2026-06-15T19:00:00Z', pricingTiers: [{ category: 'CAT1', price: 350 }] }],
-                            pagination: { page: 1, totalPages: 1 }
-                        }
-                    })
-                });
-            } else {
-                await route.fulfill({ status: 200, contentType: 'application/json', body: '{}' });
-            }
-        });
-
-        await page.goto('/events', { waitUntil: 'domcontentloaded' });
-        const heartBtn = page.locator('.fav-btn').first();
-        await expect(heartBtn).toBeVisible({ timeout: 15000 });
-
-        // Initial state
-        await expect(heartBtn).not.toHaveClass(/fav-active/);
-
-        // Toggle on
-        await heartBtn.click();
-        await expect(heartBtn).toHaveClass(/fav-active/);
-
-        // Check local storage - event ID varies based on demo/API mode
-        const favorites = await page.evaluate(() => localStorage.getItem('favoriteEvents'));
-        expect(favorites).toBeTruthy();
-        const parsed = JSON.parse(favorites || '[]');
-        expect(parsed.length).toBeGreaterThan(0);
-    });
-
-    test('should filter events by date range', async ({ page }) => {
-        const today = new Date().toISOString().slice(0, 10);
-        const tomorrow = new Date(Date.now() + 86400000).toISOString().slice(0, 10);
-
-        await page.route(API_URL, async route => {
-            const url = route.request().url();
-            if (url.includes('/events')) {
-                await route.fulfill({
-                    status: 200,
-                    contentType: 'application/json',
-                    body: JSON.stringify({
-                        data: {
-                            events: [
-                                { eventId: 'evt_001', name: 'Event Today', eventDate: `${today}T10:00:00Z`, pricingTiers: [{ category: 'GA', price: 50 }] },
-                                { eventId: 'evt_002', name: 'Event Tomorrow', eventDate: `${tomorrow}T10:00:00Z`, pricingTiers: [{ category: 'GA', price: 75 }] }
-                            ],
-                            pagination: { page: 1, totalPages: 1 }
-                        }
-                    })
-                });
-            } else {
-                await route.fulfill({ status: 200, contentType: 'application/json', body: '{}' });
-            }
-        });
-
-        await page.goto('/events', { waitUntil: 'domcontentloaded' });
-        await expect(page.locator('text=Event Today')).toBeVisible({ timeout: 15000 });
-        await expect(page.locator('text=Event Tomorrow')).toBeVisible({ timeout: 10000 });
-
-        // Set date filter
-        await page.fill('input[type="date"][title="From"]', today);
-        await page.fill('input[type="date"][title="To"]', today);
-
-        await expect(page.locator('text=Event Today')).toBeVisible();
-        await expect(page.locator('text=Event Tomorrow')).not.toBeVisible();
-    });
-});
+test('date filters match the displayed Singapore calendar day across UTC midnight', async ({ page }) => {
+  await page.route(`${api}/events?*`, route => route.fulfill({ json: { data: { events: [{ ...event, eventDate: '2030-06-15T19:00:00Z' }] } } }))
+  await page.goto('/events')
+  await page.getByLabel('From date').fill('2030-06-15')
+  await page.getByLabel('To date').fill('2030-06-15')
+  await expect(page.locator('.event-card')).toHaveCount(0)
+  await page.getByLabel('From date').fill('2030-06-16')
+  await page.getByLabel('To date').fill('2030-06-16')
+  await expect(page.locator('.event-card')).toHaveCount(1)
+  await expect(page.locator('.event-card-feature')).toContainText('16 Jun 2030')
+})

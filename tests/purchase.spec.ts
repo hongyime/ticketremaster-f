@@ -1,179 +1,112 @@
-import { test, expect } from '@playwright/test';
-import {
-    setupConsoleMonitoring,
-    assertNoConsoleErrors,
-} from './setup/console-monitor';
+import { test, expect, seedUser, seat } from './setup/fixtures'
 
+const api = 'https://ticketremasterapi.invalid'
 test.describe('Purchase Flow', () => {
-    test.beforeEach(async ({ page, context }) => {
-        // Use addInitScript to set localStorage before any navigation
-        await context.addInitScript(() => {
-            localStorage.setItem('access_token', 'mock-token');
-            localStorage.setItem('refresh_token', 'refresh-token');
-            localStorage.setItem('user', JSON.stringify({ userId: 'u1', email: 'test@example.com', role: 'user' }));
-        });
-        setupConsoleMonitoring(page);
-    });
+  test.beforeEach(async ({ context }) => seedUser(context))
 
-    test.afterEach(async () => {
-        assertNoConsoleErrors();
-    });
+  test('should reserve a seat and complete checkout', async ({ page }) => {
+    await page.clock.install()
+    const holdRequests: string[] = []
+    const payments: unknown[] = []
+    await page.route(`${api}/purchase/hold/inv_001`, route => {
+      holdRequests.push(route.request().method())
+      return route.fulfill({ json: { data: { inventoryId: 'inv_001', holdToken: 'held-token', heldUntil: new Date(Date.now() + 300000).toISOString() } } })
+    })
+    await page.route(`${api}/purchase/confirm/inv_001`, route => {
+      payments.push(route.request().postDataJSON())
+      return route.fulfill({ json: { data: { ticketId: 'tkt_001', status: 'active' } } })
+    })
+    await page.goto('/events/evt_001/seats')
+    await page.locator('.seat-tile.available').click()
+    await expect(page.locator('.seat-tile')).toHaveClass(/chosen/)
+    await page.getByRole('button', { name: 'Reserve Seat', exact: true }).click()
+    await expect(page.getByRole('button', { name: 'Seat Reserved', exact: true })).toBeDisabled()
+    expect(holdRequests).toEqual(['POST'])
+    expect(await page.evaluate(() => JSON.parse(localStorage.getItem('pendingOrder')!))).toMatchObject({ inventoryId: 'inv_001', holdToken: 'held-token', seat: { price: 100 } })
+    await page.clock.runFor(1100)
+    expect(await page.evaluate(() => JSON.parse(localStorage.getItem('pendingOrder')!))).toMatchObject({ holdToken: 'held-token', eventId: 'evt_001' })
+    await page.getByRole('button', { name: /Checkout/ }).click()
+    await expect(page).toHaveURL('/checkout/inv_001')
+    await page.getByRole('button', { name: 'Confirm Purchase' }).click()
+    await expect(page.getByRole('heading', { name: 'Ticket secured.' })).toBeVisible()
+    await page.clock.runFor(1500)
+    await expect(page).toHaveURL('/tickets')
+    expect(payments).toEqual([{ holdToken: 'held-token', eventId: 'evt_001' }])
+    expect(await page.evaluate(() => localStorage.getItem('pendingOrder'))).toBeNull()
+  })
 
-    test('should reserve a seat and pay successfully', async ({ page }) => {
-        await page.route('**/purchase/hold/*', async route => {
-            await route.fulfill({
-                status: 200,
-                contentType: 'application/json',
-                body: JSON.stringify({
-                    data: {
-                        inventoryId: 'inv_001',
-                        status: 'held',
-                        heldUntil: new Date(Date.now() + 5 * 60 * 1000).toISOString(),
-                        holdToken: 'mock-hold-token'
-                    }
-                })
-            });
-        });
+  test('should handle SEAT_UNAVAILABLE (409) when reserving', async ({ page }) => {
+    let attempts = 0
+    await page.route(`${api}/purchase/hold/inv_001`, route => {
+      attempts++
+      return route.fulfill({ status: 409, json: { error: { code: 'SEAT_UNAVAILABLE', message: 'Seat no longer available' } } })
+    })
+    await page.goto('/events/evt_001/seats')
+    await page.locator('.seat-tile.available').click()
+    await page.getByRole('button', { name: 'Reserve Seat', exact: true }).click()
+    await expect(page.locator('.toast.error').first()).toContainText(/available/i)
+    expect(attempts).toBe(1)
+    expect(await page.evaluate(() => localStorage.getItem('pendingOrder'))).toBeNull()
+    await expect(page.getByRole('button', { name: 'Seat Reserved', exact: true })).toHaveCount(0)
+  })
 
-        await page.route('**/purchase/confirm/*', async route => {
-            await route.fulfill({
-                status: 200,
-                contentType: 'application/json',
-                body: JSON.stringify({
-                    data: {
-                        ticketId: 'tkt_001',
-                        eventId: 'evt_001',
-                        status: 'active',
-                        price: 100,
-                        createdAt: new Date().toISOString()
-                    }
-                })
-            });
-        });
+  for (const failure of [
+    { status: 402, code: 'INSUFFICIENT_CREDITS', path: '/credits/topup', message: /credits/i },
+    { status: 410, code: 'PAYMENT_HOLD_EXPIRED', path: '/events/evt_001', message: /expired/i },
+  ]) {
+    test(`should handle ${failure.code} (${failure.status}) returned at confirmation`, async ({ page, context }) => {
+      await context.addInitScript(order => localStorage.setItem('pendingOrder', JSON.stringify(order)), {
+        orderId: 'inv_001', inventoryId: 'inv_001', holdToken: 'held-token',
+        heldUntil: new Date(Date.now() + 300000).toISOString(), eventId: 'evt_001', seat,
+      })
+      let attempts = 0
+      await page.route(`${api}/purchase/confirm/inv_001`, route => {
+        attempts++
+        return route.fulfill({ status: failure.status, json: { error: { code: failure.code } } })
+      })
+      // On expired confirmation the route guard also releases any server-side hold.
+      await page.route(`${api}/purchase/hold/inv_001`, route => route.fulfill({ json: { data: {} } }))
+      await page.goto('/checkout/inv_001')
+      await expect(page.getByRole('button', { name: 'Confirm Purchase' })).toBeEnabled()
+      await page.getByRole('button', { name: 'Confirm Purchase' }).click()
+      await expect(page).toHaveURL(failure.path)
+      await expect(page.locator('.toast.error').first()).toContainText(failure.message)
+      expect(attempts).toBe(1)
+    })
+  }
+})
 
-        await page.route('**/credits/balance', async route => {
-            await route.fulfill({
-                status: 200,
-                contentType: 'application/json',
-                body: JSON.stringify({ data: { creditBalance: 500 } })
-            });
-        });
 
-        await page.goto('/events/evt_001/seats');
-        await page.waitForLoadState('domcontentloaded');
+test('dismissing a reservation banner must retain the hold until its absolute expiry', async ({ page }) => {
+  const now = new Date('2030-01-01T00:00:00Z')
+  await page.clock.install({ time: now })
+  await page.clock.pauseAt(now)
+  await page.goto('/events')
+  await page.evaluate(() => localStorage.setItem('pendingOrder', JSON.stringify({ orderId: 'kept-order', inventoryId: 'kept-order', heldUntil: new Date(Date.now() + 5000).toISOString(), event: { name: 'Kept Concert' } })))
+  await page.clock.runFor(1100)
+  await expect(page.locator('.pending-banner')).toContainText('Kept Concert')
+  await page.locator('.pending-banner').getByRole('button', { name: 'Dismiss' }).click()
+  await page.clock.runFor(1100)
+  await expect(page.locator('.pending-banner')).toHaveCount(0)
+  expect(await page.evaluate(() => JSON.parse(localStorage.getItem('pendingOrder')!).orderId)).toBe('kept-order')
+  const expiry = await page.evaluate(() => new Date(JSON.parse(localStorage.getItem('pendingOrder')!).heldUntil).getTime())
+  await page.clock.setFixedTime(new Date(expiry - 100))
+  await page.evaluate(() => window.dispatchEvent(new Event('storage')))
+  expect(await page.evaluate(() => JSON.parse(localStorage.getItem('pendingOrder')!).orderId)).toBe('kept-order')
+  await page.clock.setFixedTime(new Date(expiry))
+  await page.evaluate(() => window.dispatchEvent(new Event('storage')))
+  expect(await page.evaluate(() => localStorage.getItem('pendingOrder'))).toBeNull()
+})
 
-        const seatBtn = page.locator('button.seat-btn.available').first();
-        if (await seatBtn.count() > 0) {
-            await seatBtn.click();
-            const reserveBtn = page.locator('button:has-text("Reserve Seat")');
-            if (await reserveBtn.count() > 0) {
-                await reserveBtn.click();
-                await expect(page.locator('h1')).toContainText(/Checkout/);
-                await page.click('button:has-text("Confirm Purchase")');
-                await page.waitForURL('**/tickets', { timeout: 10000 });
-                await expect(page.locator('h1')).toContainText(/My Tickets|Tickets/);
-            }
-        }
-    });
-
-    test('should handle SEAT_UNAVAILABLE (409)', async ({ page }) => {
-        await page.route('**/purchase/hold/*', async route => {
-            await route.fulfill({
-                status: 409,
-                contentType: 'application/json',
-                body: JSON.stringify({
-                    error: { code: 'SEAT_UNAVAILABLE', message: 'Seat is no longer available' }
-                })
-            });
-        });
-
-        await page.goto('/events/evt_001/seats');
-        await page.waitForLoadState('domcontentloaded');
-
-        const seatBtn = page.locator('button.seat-btn.available').first();
-        if (await seatBtn.count() > 0) {
-            await seatBtn.click();
-            const reserveBtn = page.locator('button:has-text("Reserve Seat")');
-            if (await reserveBtn.count() > 0) {
-                await reserveBtn.click();
-                const toast = page.locator('.toast.error');
-                await expect(toast).toBeVisible({ timeout: 10000 });
-                await expect(toast).toContainText(/no longer available|Seat is|unavailable/i);
-            }
-        }
-    });
-
-    test('should handle INSUFFICIENT_CREDITS (402)', async ({ page, context }) => {
-        await page.route('**/credits/balance', async route => {
-            await route.fulfill({
-                status: 200,
-                contentType: 'application/json',
-                body: JSON.stringify({ data: { creditBalance: 10 } })
-            });
-        });
-
-        await page.route('**/purchase/confirm/*', async route => {
-            await route.fulfill({
-                status: 402,
-                contentType: 'application/json',
-                body: JSON.stringify({
-                    error: { code: 'INSUFFICIENT_CREDITS', message: 'Not enough credits' }
-                })
-            });
-        });
-
-        await context.addInitScript(() => {
-            localStorage.setItem('pendingOrder', JSON.stringify({
-                orderId: 'inv_001',
-                inventoryId: 'inv_001',
-                holdToken: 'mock-token',
-                eventId: 'evt_001',
-                seat: { price: 100 }
-            }));
-        });
-
-        await page.goto('/checkout/inv_001');
-        await page.waitForLoadState('domcontentloaded');
-
-        const confirmBtn = page.locator('button:has-text("Confirm Purchase")');
-        if (await confirmBtn.count() > 0 && await confirmBtn.isEnabled()) {
-            await confirmBtn.click();
-            const toast = page.locator('.toast.error').first();
-            await expect(toast).toBeVisible({ timeout: 10000 });
-            await expect(toast).toContainText(/Not enough credits|Insufficient/);
-        }
-    });
-
-    test('should handle HOLD_EXPIRED (410)', async ({ page, context }) => {
-        await page.route('**/purchase/confirm/*', async route => {
-            await route.fulfill({
-                status: 410,
-                contentType: 'application/json',
-                body: JSON.stringify({
-                    error: { code: 'PAYMENT_HOLD_EXPIRED', message: 'Seat hold expired' }
-                })
-            });
-        });
-
-        await context.addInitScript(() => {
-            localStorage.setItem('pendingOrder', JSON.stringify({
-                orderId: 'inv_001',
-                inventoryId: 'inv_001',
-                holdToken: 'mock-token',
-                eventId: 'evt_001',
-                seat: { price: 100 }
-            }));
-        });
-
-        await page.goto('/checkout/inv_001');
-        await page.waitForLoadState('domcontentloaded');
-
-        const confirmBtn = page.locator('button:has-text("Confirm Purchase")');
-        if (await confirmBtn.count() > 0 && await confirmBtn.isEnabled()) {
-            await confirmBtn.click();
-            const toast = page.locator('.toast.error').first();
-            await expect(toast).toBeVisible({ timeout: 10000 });
-            await expect(toast).toContainText(/expired|hold/i);
-        }
-    });
-});
+test('a new reservation replaces the dismissed banner without losing its token', async ({ page }) => {
+  await page.clock.install()
+  await page.goto('/events')
+  const hold = (orderId: string) => page.evaluate(id => localStorage.setItem('pendingOrder', JSON.stringify({ orderId: id, holdToken: id, heldUntil: new Date(Date.now() + 300000).toISOString(), event: { name: id } })), orderId)
+  await hold('first-hold')
+  await page.clock.runFor(1100)
+  await page.locator('.pending-banner').getByRole('button', { name: 'Dismiss' }).click()
+  await hold('second-hold')
+  await page.clock.runFor(1100)
+  await expect(page.locator('.pending-banner')).toContainText('second-hold')
+  expect(await page.evaluate(() => JSON.parse(localStorage.getItem('pendingOrder')!).holdToken)).toBe('second-hold')
+})

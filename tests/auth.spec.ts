@@ -1,21 +1,10 @@
-import { test, expect } from '@playwright/test';
-import {
-    setupConsoleMonitoring,
-    assertNoConsoleErrors,
-} from './setup/console-monitor';
+import { test, expect } from './setup/fixtures';
 
 test.describe('Authentication Flow', () => {
-    test.beforeEach(async ({ page }) => {
-        setupConsoleMonitoring(page);
-    });
-
-    test.afterEach(async () => {
-        assertNoConsoleErrors();
-    });
 
     test('should show login page and handle successful login', async ({ page }) => {
         // Mock successful login response - actual endpoint: POST /auth/login
-        await page.route('**/auth/login', async route => {
+        await page.route('https://ticketremasterapi.invalid/auth/login', async route => {
             await route.fulfill({
                 status: 200,
                 contentType: 'application/json',
@@ -30,9 +19,9 @@ test.describe('Authentication Flow', () => {
         });
 
         await page.goto('/login');
-        await expect(page.locator('h1')).toHaveText(/Sign In/);
+        await expect(page.locator('h1')).toHaveText('Welcome Back');
 
-        await page.fill('input[placeholder*="email"]', 'test@example.com');
+        await page.fill('input[type="email"]', 'test@example.com');
         await page.fill('input[type="password"]', 'password123');
         await page.click('button:has-text("Sign In")');
 
@@ -42,7 +31,7 @@ test.describe('Authentication Flow', () => {
 
     test('should handle 401 Unauthorized with toast message', async ({ page }) => {
         // Mock 401 response
-        await page.route('**/auth/login', async route => {
+        await page.route('https://ticketremasterapi.invalid/auth/login', async route => {
             await route.fulfill({
                 status: 401,
                 contentType: 'application/json',
@@ -53,7 +42,7 @@ test.describe('Authentication Flow', () => {
         });
 
         await page.goto('/login');
-        await page.fill('input[placeholder*="email"]', 'wrong@example.com');
+        await page.fill('input[type="email"]', 'wrong@example.com');
         await page.fill('input[type="password"]', 'wrongpass');
         await page.click('button:has-text("Sign In")');
 
@@ -65,7 +54,7 @@ test.describe('Authentication Flow', () => {
 
     test('should handle registration successfully', async ({ page }) => {
         // Mock registration - actual endpoint: POST /auth/register
-        await page.route('**/auth/register', async route => {
+        await page.route('https://ticketremasterapi.invalid/auth/register', async route => {
             await route.fulfill({
                 status: 201,
                 body: JSON.stringify({
@@ -81,17 +70,17 @@ test.describe('Authentication Flow', () => {
 
         await page.goto('/register');
         await page.fill('input[placeholder*="your name"]', 'New Demo User');
-        await page.fill('input[placeholder*="email"]', 'new@example.com');
-        await page.fill('input[placeholder*="Phone number"]', '91234567');
+        await page.fill('input[type="email"]', 'new@example.com');
+        await page.fill('input[type="tel"]', '91234567');
         await page.fill('input[type="password"]', 'password123');
-        await page.click('button:has-text("Register Account")');
+        await page.click('button[type="submit"]');
 
         // Should redirect to verify (OTP step) or login
         await expect(page).toHaveURL(/\/(verify|login)/, { timeout: 10000 });
     });
 
     test('should handle registration validation errors (400)', async ({ page }) => {
-        await page.route('**/auth/register', async route => {
+        await page.route('https://ticketremasterapi.invalid/auth/register', async route => {
             await route.fulfill({
                 status: 400,
                 body: JSON.stringify({
@@ -103,10 +92,10 @@ test.describe('Authentication Flow', () => {
 
         await page.goto('/register');
         await page.fill('input[placeholder*="your name"]', 'Valid User');
-        await page.fill('input[placeholder*="email"]', 'valid@example.com');
-        await page.fill('input[placeholder*="Phone number"]', '91234567');
+        await page.fill('input[type="email"]', 'valid@example.com');
+        await page.fill('input[type="tel"]', '91234567');
         await page.fill('input[type="password"]', 'password123');
-        await page.click('button:has-text("Register Account")');
+        await page.click('button[type="submit"]');
 
         const toast = page.locator('.toast.error').first();
         await expect(toast).toBeVisible({ timeout: 10000 });
@@ -114,7 +103,7 @@ test.describe('Authentication Flow', () => {
     });
 
     test('should handle duplicate email registration (409)', async ({ page }) => {
-        await page.route('**/auth/register', async route => {
+        await page.route('https://ticketremasterapi.invalid/auth/register', async route => {
             await route.fulfill({
                 status: 409,
                 body: JSON.stringify({
@@ -125,10 +114,10 @@ test.describe('Authentication Flow', () => {
 
         await page.goto('/register');
         await page.fill('input[placeholder*="your name"]', 'Existing User');
-        await page.fill('input[placeholder*="email"]', 'existing@example.com');
-        await page.fill('input[placeholder*="Phone number"]', '91234567');
+        await page.fill('input[type="email"]', 'existing@example.com');
+        await page.fill('input[type="tel"]', '91234567');
         await page.fill('input[type="password"]', 'password123');
-        await page.click('button:has-text("Register Account")');
+        await page.click('button[type="submit"]');
 
         const toast = page.locator('.toast.error').first();
         await expect(toast).toBeVisible({ timeout: 10000 });
@@ -139,6 +128,7 @@ test.describe('Authentication Flow', () => {
         // Clear any stored auth by using a fresh context
         await context.clearCookies();
         await context.addInitScript(() => {
+      if (location.origin !== 'http://127.0.0.1:43187') return
             localStorage.clear();
         });
 

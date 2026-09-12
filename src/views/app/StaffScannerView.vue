@@ -306,7 +306,31 @@ onMounted(() => {
           cameraSupported.value = false
           return
         }
-        barcodeReader.value = markRaw(reader)
+        // The upstream component drops the decode promise. Catch permission and
+        // device failures here so manual verification remains available.
+        barcodeReader.value = markRaw({
+          ...reader,
+          beforeUnmount(this: any) {
+            this.cameraDisposed = true
+            reader.beforeUnmount?.call(this)
+          },
+          methods: {
+            ...reader.methods,
+            async start(this: any) {
+              try {
+                await this.codeReader.decodeFromVideoDevice(undefined, this.$refs.scanner, (result: any) => {
+                  if (result && !this.cameraDisposed) {
+                    this.$emit('decode', result.text)
+                    this.$emit('result', result)
+                  }
+                })
+                if (this.cameraDisposed) this.codeReader.reset()
+              } catch {
+                if (!this.cameraDisposed) this.$emit('camera-unavailable')
+              }
+            },
+          },
+        })
       })
       .catch(() => {
         cameraSupported.value = false
@@ -391,7 +415,7 @@ onMounted(() => {
             </div>
 
             <div class="camera-wrap">
-              <component v-if="scannerReady && cameraSupported && barcodeReader" :is="barcodeReader" @decode="onDecode" />
+              <component v-if="scannerReady && cameraSupported && barcodeReader" :is="barcodeReader" @decode="onDecode" @camera-unavailable="cameraSupported = false" />
               <div v-else class="camera-fallback" :class="{ 'camera-fallback-locked': !scannerReady }">
                 <span class="badge">{{ scannerReady ? 'Camera unavailable' : 'Scanner locked' }}</span>
                 <h2 v-if="scannerReady">Use manual verification on this device.</h2>

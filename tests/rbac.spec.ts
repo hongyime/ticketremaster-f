@@ -1,8 +1,4 @@
-import { test, expect } from '@playwright/test';
-import {
-    setupConsoleMonitoring,
-    assertNoConsoleErrors,
-} from './setup/console-monitor';
+import { test, expect } from './setup/fixtures';
 
 /**
  * Role-Based Access Control (RBAC) Tests
@@ -15,19 +11,12 @@ import {
  * - Staff users can access staff routes but not admin routes
  */
 test.describe('Role-Based Access Control', () => {
-    test.beforeEach(async ({ page }) => {
-        setupConsoleMonitoring(page);
-    });
-
-    test.afterEach(async () => {
-        assertNoConsoleErrors();
-    });
 
     test.describe('Unauthenticated Access', () => {
         test('should redirect unauthenticated user from /tickets to /login', async ({ page, context }) => {
             // Use fresh context with cleared storage
             await context.clearCookies();
-            await context.addInitScript(() => localStorage.clear());
+            await context.addInitScript(() => { if (location.origin === 'http://127.0.0.1:43187') localStorage.clear() });
 
             await page.goto('/tickets');
             await expect(page).toHaveURL('/login');
@@ -35,7 +24,7 @@ test.describe('Role-Based Access Control', () => {
 
         test('should redirect unauthenticated user from /profile to /login', async ({ page, context }) => {
             await context.clearCookies();
-            await context.addInitScript(() => localStorage.clear());
+            await context.addInitScript(() => { if (location.origin === 'http://127.0.0.1:43187') localStorage.clear() });
 
             await page.goto('/profile');
             await expect(page).toHaveURL('/login');
@@ -43,7 +32,7 @@ test.describe('Role-Based Access Control', () => {
 
         test('should redirect unauthenticated user from /checkout to /login', async ({ page, context }) => {
             await context.clearCookies();
-            await context.addInitScript(() => localStorage.clear());
+            await context.addInitScript(() => { if (location.origin === 'http://127.0.0.1:43187') localStorage.clear() });
 
             await page.goto('/checkout/order123');
             await expect(page).toHaveURL('/login');
@@ -51,7 +40,7 @@ test.describe('Role-Based Access Control', () => {
 
         test('should redirect unauthenticated user from /credits/topup to /login', async ({ page, context }) => {
             await context.clearCookies();
-            await context.addInitScript(() => localStorage.clear());
+            await context.addInitScript(() => { if (location.origin === 'http://127.0.0.1:43187') localStorage.clear() });
 
             await page.goto('/credits/topup');
             await expect(page).toHaveURL('/login');
@@ -59,7 +48,7 @@ test.describe('Role-Based Access Control', () => {
 
         test('should redirect unauthenticated user from /transfer/initiate to /login', async ({ page, context }) => {
             await context.clearCookies();
-            await context.addInitScript(() => localStorage.clear());
+            await context.addInitScript(() => { if (location.origin === 'http://127.0.0.1:43187') localStorage.clear() });
 
             await page.goto('/transfer/initiate');
             await expect(page).toHaveURL('/login');
@@ -67,7 +56,7 @@ test.describe('Role-Based Access Control', () => {
 
         test('should redirect unauthenticated user from /admin routes to /login', async ({ page, context }) => {
             await context.clearCookies();
-            await context.addInitScript(() => localStorage.clear());
+            await context.addInitScript(() => { if (location.origin === 'http://127.0.0.1:43187') localStorage.clear() });
 
             await page.goto('/admin/events/new');
             await expect(page).toHaveURL('/login');
@@ -81,7 +70,7 @@ test.describe('Role-Based Access Control', () => {
 
         test('should redirect unauthenticated user from /staff routes to /login', async ({ page, context }) => {
             await context.clearCookies();
-            await context.addInitScript(() => localStorage.clear());
+            await context.addInitScript(() => { if (location.origin === 'http://127.0.0.1:43187') localStorage.clear() });
 
             await page.goto('/staff/scan');
             await expect(page).toHaveURL('/login');
@@ -89,7 +78,7 @@ test.describe('Role-Based Access Control', () => {
 
         test('should allow unauthenticated access to public routes', async ({ page, context }) => {
             await context.clearCookies();
-            await context.addInitScript(() => localStorage.clear());
+            await context.addInitScript(() => { if (location.origin === 'http://127.0.0.1:43187') localStorage.clear() });
 
             // These routes should be accessible without auth
             await page.goto('/');
@@ -125,6 +114,7 @@ test.describe('Role-Based Access Control', () => {
         test.beforeEach(async ({ page, context }) => {
             // Set up standard user session using addInitScript
             await context.addInitScript(() => {
+      if (location.origin !== 'http://127.0.0.1:43187') return
                 localStorage.setItem('access_token', 'user-token');
                 localStorage.setItem('refresh_token', 'refresh-token');
                 localStorage.setItem('user', JSON.stringify({
@@ -174,6 +164,7 @@ test.describe('Role-Based Access Control', () => {
         test.beforeEach(async ({ page, context }) => {
             // Set up admin user session using addInitScript
             await context.addInitScript(() => {
+      if (location.origin !== 'http://127.0.0.1:43187') return
                 localStorage.setItem('access_token', 'admin-token');
                 localStorage.setItem('refresh_token', 'refresh-token');
                 localStorage.setItem('user', JSON.stringify({
@@ -197,8 +188,10 @@ test.describe('Role-Based Access Control', () => {
         });
 
         test('admin user should access /admin/events/:id/dashboard', async ({ page }) => {
+            await page.route('https://ticketremasterapi.invalid/admin/events/test123/dashboard', route => route.fulfill({ json: { data: { stats: { totalSeats: 10, seatsSold: 2, revenue: 200 }, attendees: [] } } }));
             await page.goto('/admin/events/test123/dashboard');
             await expect(page).toHaveURL('/admin/events/test123/dashboard');
+            await expect(page.getByRole('heading', { level: 1 })).toHaveText('Event Dashboard');
         });
 
         test('admin user should NOT access /staff/scan', async ({ page }) => {
@@ -220,6 +213,7 @@ test.describe('Role-Based Access Control', () => {
         test.beforeEach(async ({ page, context }) => {
             // Set up staff user session using addInitScript
             await context.addInitScript(() => {
+      if (location.origin !== 'http://127.0.0.1:43187') return
                 localStorage.setItem('access_token', 'staff-token');
                 localStorage.setItem('refresh_token', 'refresh-token');
                 localStorage.setItem('user', JSON.stringify({
@@ -233,7 +227,7 @@ test.describe('Role-Based Access Control', () => {
         test('staff user should access /staff/scan', async ({ page }) => {
             await page.goto('/staff/scan');
             await expect(page).toHaveURL('/staff/scan');
-            await expect(page.locator('h1')).toContainText(/Staff|Scanner|Ticket|QR/, { timeout: 10000 });
+            await expect(page.locator('h1')).toContainText('Fast gate verification for live events.', { timeout: 10000 });
         });
 
         test('staff user should NOT access /admin/events/new', async ({ page }) => {

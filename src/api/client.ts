@@ -14,6 +14,7 @@ interface InternalAxiosRequestConfigWithMetadata extends InternalAxiosRequestCon
   }
   suppressErrorToast?: boolean
   suppressErrorLog?: boolean
+  skipRetry?: boolean
 }
 import { useAuthStore } from '@/stores/auth'
 import { useToast } from '@/composables/useToast'
@@ -22,6 +23,13 @@ import type { ApiError } from '@/types'
 
 const api: AxiosInstance = axios.create()
 const apiKey: string = import.meta.env.VITE_KONG_API_KEY || ''
+
+// A browser cancels pending requests when navigating away. That is not an outage
+// and must not replace a saved login with an offline demo account.
+let pageLeaving = false
+window.addEventListener('beforeunload', () => { pageLeaving = true })
+window.addEventListener('pagehide', () => { pageLeaving = true })
+window.addEventListener('pageshow', () => { pageLeaving = false })
 
 let offlineNotified = false
 let demoModeEnabled = false
@@ -229,6 +237,7 @@ api.interceptors.response.use(
     return response
   },
   async (error: AxiosError<ApiError>) => {
+    if (pageLeaving || axios.isCancel(error)) return Promise.reject(error)
     logApiError(error)
     const toast = useToast()
     const status = error?.response?.status
@@ -268,6 +277,7 @@ api.interceptors.response.use(
     // Exponential backoff retry for retryable status codes
     const retryCount = original.__retryCount || 0
     if (
+      !original.skipRetry &&
       (status && RETRYABLE_STATUS_CODES.includes(status)) &&
       retryCount < MAX_RETRY_ATTEMPTS
     ) {

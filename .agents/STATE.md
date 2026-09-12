@@ -1,15 +1,11 @@
-# Notification polling maintenance
+# Browser workflow maintenance
 
-Current task: trace and repair unnecessary notification requests while preserving transaction deadlines and current user flows.
+Current task: restore meaningful browser gates and repair reproduced frontend defects from main 98e12d9. Production has not changed yet.
 
-- [x] Trace notification and realtime fallback ownership.
-- [x] Reproduce background, overlapping and stale-session requests with offline fixtures.
-- [x] Repair the request lifecycle without changing transfer, reservation or QR deadlines.
-- [ ] Run relevant tests/build checks and verify the production release.
-- [ ] Record preservation and update the portfolio report.
+- Confirmed false-success CI: build/test errors were suppressed and Firefox/WebKit projects were absent. The replacement defines all three browsers, checks test types, fails on test/build errors and bounds jobs/report retention.
+- All 14 browser specs now exercise actual UI behavior against isolated synthetic API, Socket.IO and Stripe providers; no live transaction providers are called.
+- Repairs implemented: new reservation preservation, complete returned event pages, accessible favorites, calendar date controls, handled camera rejection, and bounded manual offline recovery.
+- Chromium covers 134 scenarios across a 133-pass full run and a corrected native-XHR deadline check. Firefox/WebKit first full run passed 258/268. Navigation cancellation, precise expiry and narrowly classified synthetic failures are repaired; the final focused cases are being rechecked. Hosted Chromium and Firefox each passed all 134 cases. The two hosted Safari failures were reproduced and now pass locally after using the earlier navigation event and an explicit abort deadline. Successful-asset preload timing advisories remain attached to browser reports.
+- Source and browser-test type checking plus workflow lint pass. All 44 unit cases pass on the final serial rerun; the previous concurrent dynamic-import timeout is recorded.
 
-The working branch starts from current main `3bd16d2`. The original checkout is clean and remains untouched during implementation. Existing dependency updates are retained. Tests must use synthetic responses, with no live payments, OTPs or outbound notifications.
-
-The production owner is the Pinia notification store. The older seller hook is test-only. Ten lifecycle cases failed before repair; all 21 now pass, plus 23 existing targeted UI tests. Type checking and the production build pass. Desktop/mobile fixtures each start with two reads, make none during 90 seconds hidden, catch up once on return, then resume the 30-second fallback. Baseline confirms old logging/style assertions and a randomized invalid-date fixture remain separate issues. CI explicitly gates types and the notification contract. The existing browser workflow suppresses failures and needs a separate repair. Next: verify hosted checks and production, then synchronize the preserved original checkout and report the release.
-
-PR #187 has a READY preview and successful hosted Build check. Conflicting default/advanced CodeQL setup rejected custom uploads. The workflow now retains Actions, JavaScript/TypeScript and Python coverage as the sole configuration; final upload and release verification are pending.
+Next: finish cross-browser verification and verify hosted gates and exact production commit, then publish PostPlan 67. No environment files or production data were changed. Backend transaction integration remains separately unverified. The full portfolio goal remains active.

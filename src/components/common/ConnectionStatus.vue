@@ -1,9 +1,43 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref } from 'vue'
+import api from '@/api/client'
+import { setDemoMode } from '@/services/mockData'
 
 const DISMISS_KEY = 'offline_banner_dismissed'
-const offline = ref(Boolean((window as unknown as Record<string, unknown>).__apiOffline))
+const storedDemoContext = sessionStorage.getItem('demo_context')
+const offline = ref(Boolean((window as unknown as Record<string, unknown>).__apiOffline) ||
+  storedDemoContext === 'offline' ||
+  (sessionStorage.getItem('ticketremaster_demo_mode') === 'true' && storedDemoContext !== 'manual'))
 const message = ref('Backend unavailable. Showing demo data while live services recover.')
+const retrying = ref(false)
+const retryError = ref('')
+let retryController: AbortController | null = null
+const RETRY_REQUEST = { params: { limit: 1 }, timeout: 8000, skipRetry: true, suppressErrorToast: true, suppressErrorLog: true }
+
+const retryConnection = async () => {
+  if (retrying.value) return
+  retrying.value = true
+  retryError.value = ''
+  const controller = new AbortController()
+  retryController = controller
+  const deadline = window.setTimeout(() => controller.abort(), 8000)
+  const wasOfflineAccount = sessionStorage.getItem('demo_context') === 'offline'
+  try {
+    // One user-initiated probe, with an eight-second deadline and no automatic retries.
+    await api.get('/events', { ...RETRY_REQUEST, signal: controller.signal })
+    setDemoMode(false)
+    sessionStorage.removeItem(DISMISS_KEY)
+    window.dispatchEvent(new Event('api:online'))
+    window.location.assign(wasOfflineAccount ? '/login' : window.location.href)
+  } catch {
+    retryError.value = 'The service is still unavailable. Please try again later.'
+  } finally {
+    window.clearTimeout(deadline)
+    if (retryController === controller) retryController = null
+    retrying.value = false
+  }
+}
+
 const dismissed = ref(sessionStorage.getItem(DISMISS_KEY) === 'true')
 
 const showBanner = computed(() => offline.value && !dismissed.value)
@@ -31,6 +65,7 @@ onMounted(() => {
 })
 
 onUnmounted(() => {
+  retryController?.abort()
   window.removeEventListener('api:online', handleOnline)
   window.removeEventListener('api:offline', handleOffline as EventListener)
 })
@@ -41,8 +76,12 @@ onUnmounted(() => {
     <div class="offline-copy">
       <strong>Offline Demo Mode</strong>
       <p>{{ message }}</p>
+      <p v-if="retryError" class="retry-error" role="alert">{{ retryError }}</p>
     </div>
-    <button class="dismiss-button" type="button" @click="dismiss">Dismiss</button>
+    <div class="offline-actions">
+      <button class="dismiss-button" type="button" :disabled="retrying" @click="retryConnection">{{ retrying ? 'Retrying...' : 'Retry connection' }}</button>
+      <button class="dismiss-button" type="button" @click="dismiss">Dismiss</button>
+    </div>
   </div>
 </template>
 
@@ -80,6 +119,12 @@ onUnmounted(() => {
   color: rgba(255, 255, 255, 0.78);
   font-size: 0.92rem;
   line-height: 1.45;
+}
+
+.offline-actions {
+  display: flex;
+  gap: 0.6rem;
+  flex-wrap: wrap;
 }
 
 .dismiss-button {
