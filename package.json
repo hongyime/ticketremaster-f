@@ -10,6 +10,7 @@
     "build:skip-types": "vite build",
     "preview": "vite preview",
     "typecheck": "vue-tsc --noEmit",
+    "test:notifications": "vitest run src/stores/__tests__/notifications.spec.ts",
     "test": "playwright test",
     "test:ui": "playwright test --ui"
   },

@@ -718,6 +718,7 @@ describe('Frontend UX Fixes — targeted coverage', () => {
   })
 
   it('notification store treats buyer pending 404 as empty without warning noise', async () => {
+    vi.mocked(isDemoMode).mockReturnValue(false)
     const consoleWarn = vi.spyOn(console, 'warn').mockImplementation(() => {})
     vi.mocked(api.get).mockRejectedValueOnce({ response: { status: 404 } } as any)
 
@@ -729,6 +730,7 @@ describe('Frontend UX Fixes — targeted coverage', () => {
   })
 
   it('notification store shows seller OTP-ready copy after buyer verification', async () => {
+    vi.mocked(isDemoMode).mockReturnValue(false)
     vi.mocked(api.get).mockResolvedValueOnce({
       data: {
         data: {

@@ -148,7 +148,7 @@ function primaryLabel(item: any): string {
 }
 
 onMounted(() => {
-  checkNotifications()
+  void legacyNotifications?.checkNotifications()
   if (!isDemoMode()) {
     notificationStore.initialize()
   }

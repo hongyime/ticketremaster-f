@@ -85,7 +85,6 @@ watch(
   (enabled) => {
     if (enabled) {
       setupNotificationRuntime()
-      void notifications.fetchAll()
       return
     }
 
@@ -110,6 +109,7 @@ onUnmounted(() => {
   window.removeEventListener('api:offline', handleOffline)
   window.removeEventListener('api:online', handleOnline)
   cleanupNotificationSubscriptions()
+  notifications.clearAll()
 })
 </script>
 

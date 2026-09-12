@@ -5,7 +5,7 @@
  */
 
 import { defineStore } from 'pinia'
-import { computed, ref } from 'vue'
+import { computed, onScopeDispose, ref, watch } from 'vue'
 import type { NotificationCenterItem, NotificationItemType } from '@/types'
 import api from '@/api/client'
 import { useAuthStore } from './auth'
@@ -14,7 +14,7 @@ import { isDemoMode } from '@/services/mockData'
 const SESSION_CACHE_KEY = 'notification_ephemeral_cache'
 const CACHE_TTL_MS = 24 * 60 * 60 * 1000 // 24 hours
 const POLL_INTERVAL_MS = 30 * 1000
-const SILENT_BACKGROUND_REQUEST = { suppressErrorToast: true, suppressErrorLog: true } as any
+const SILENT_BACKGROUND_REQUEST = { suppressErrorToast: true, suppressErrorLog: true, timeout: 30_000 } as any
 
 interface CachedNotification extends NotificationCenterItem {
   expiresAt: string
@@ -141,6 +141,13 @@ export const useNotificationStore = defineStore('notifications', () => {
   const initialized = ref(false)
   const realtimeConnected = ref(false)
   let pollTimer: number | undefined
+  let disposed = false
+  let listening = false
+  let generation = 0
+  let revision = 0
+  let refreshQueued = false
+  let activeBatch: Promise<void> | undefined
+  const requests = new Map<string, { controller: AbortController; promise: Promise<boolean> }>()
 
   const allNotifications = computed(() => {
     const merged = [...sellerPending.value, ...buyerPending.value, ...ephemeral.value]
@@ -150,19 +157,62 @@ export const useNotificationStore = defineStore('notifications', () => {
 
   const unreadCount = computed(() => allNotifications.value.length)
 
-  function startPolling(): void {
-    if (pollTimer) return
-    if (!auth.state.accessToken || auth.isStaff || auth.isAdmin || isDemoMode() || realtimeConnected.value) return
+  function eligible(): boolean {
+    return Boolean(auth.state.accessToken) && !auth.isStaff && !auth.isAdmin && !auth.isDemoSession && !isDemoMode()
+  }
 
-    pollTimer = window.setInterval(() => {
+  function canRead(): boolean {
+    return !disposed && eligible() && !document.hidden && navigator.onLine !== false
+  }
+
+  function startPolling(): void {
+    if (pollTimer !== undefined || activeBatch || !initialized.value || !canRead() || realtimeConnected.value) return
+
+    // Wait after completion so a slow backend cannot accumulate overlapping reads.
+    pollTimer = window.setTimeout(() => {
+      pollTimer = undefined
       void fetchAll()
     }, POLL_INTERVAL_MS)
   }
 
   function stopPolling(): void {
-    if (pollTimer) {
-      window.clearInterval(pollTimer)
+    if (pollTimer !== undefined) {
+      window.clearTimeout(pollTimer)
       pollTimer = undefined
+    }
+  }
+
+  function invalidateRequests(): void {
+    generation += 1
+    stopPolling()
+    for (const request of requests.values()) request.controller.abort()
+    requests.clear()
+    activeBatch = undefined
+    refreshQueued = false
+    loading.value = false
+  }
+
+  function handleAvailability(): void {
+    if (!initialized.value) return
+    if (!canRead()) {
+      invalidateRequests()
+      return
+    }
+    // A connected socket does not guarantee events were received while suspended.
+    void fetchAll()
+  }
+
+  function setListeners(enabled: boolean): void {
+    if (enabled === listening) return
+    listening = enabled
+    if (enabled) {
+      document.addEventListener('visibilitychange', handleAvailability)
+      window.addEventListener('online', handleAvailability)
+      window.addEventListener('offline', handleAvailability)
+    } else {
+      document.removeEventListener('visibilitychange', handleAvailability)
+      window.removeEventListener('online', handleAvailability)
+      window.removeEventListener('offline', handleAvailability)
     }
   }
 
@@ -176,44 +226,53 @@ export const useNotificationStore = defineStore('notifications', () => {
   }
 
   function initialize(): void {
-    if (initialized.value) return
+    if (initialized.value || disposed) return
     initialized.value = true
+    setListeners(true)
     void fetchAll()
-    startPolling()
+  }
+
+  function fetchPending(seller: boolean): Promise<boolean> {
+    if (!canRead()) return Promise.resolve(false)
+    const url = seller ? '/transfer/pending' : '/transfer/my-pending'
+    const existing = requests.get(url)
+    if (existing) return existing.promise
+    const target = seller ? sellerPending : buyerPending
+    const mapper = seller ? mapSellerPendingTransfer : mapBuyerPendingTransfer
+    const controller = new AbortController()
+    const requestGeneration = generation
+    const requestRevision = revision
+    const token = auth.state.accessToken
+    const userId = auth.state.user?.userId
+    const current = () => canRead() && !controller.signal.aborted &&
+      requestGeneration === generation && requestRevision === revision &&
+      token === auth.state.accessToken && userId === auth.state.user?.userId
+
+    const promise = (async () => {
+      try {
+        const response = await api.get(url, { ...SILENT_BACKGROUND_REQUEST, signal: controller.signal })
+        if (!current()) return false
+        target.value = readTransfers(response.data).map(mapper)
+        return true
+      } catch (error: any) {
+        if (current() && error?.response?.status === 404) target.value = []
+        // Keep the last known list on transient failures. Axios handles these
+        // background errors silently; never log request headers or user data.
+        return false
+      } finally {
+        if (requests.get(url)?.controller === controller) requests.delete(url)
+      }
+    })()
+    requests.set(url, { controller, promise })
+    return promise
   }
 
   async function fetchSellerPending(): Promise<void> {
-    if (!auth.state.accessToken || auth.isStaff || auth.isAdmin) {
-      sellerPending.value = []
-      return
-    }
-
-    try {
-      const response = await api.get('/transfer/pending', SILENT_BACKGROUND_REQUEST)
-      sellerPending.value = readTransfers(response.data).map(mapSellerPendingTransfer)
-    } catch (error: any) {
-      if (error?.response?.status !== 404) {
-        console.error('[Notifications] Failed to fetch seller pending:', error)
-      }
-      sellerPending.value = []
-    }
+    await fetchPending(true)
   }
 
   async function fetchBuyerPending(): Promise<void> {
-    if (!auth.state.accessToken || auth.isStaff || auth.isAdmin) {
-      buyerPending.value = []
-      return
-    }
-
-    try {
-      const response = await api.get('/transfer/my-pending', SILENT_BACKGROUND_REQUEST)
-      buyerPending.value = readTransfers(response.data).map(mapBuyerPendingTransfer)
-    } catch (error: any) {
-      if (error?.response?.status !== 404) {
-        console.warn('[Notifications] Buyer pending endpoint not available:', error)
-      }
-      buyerPending.value = []
-    }
+    await fetchPending(false)
   }
 
   function addEphemeral(item: Omit<NotificationCenterItem, 'id'>): void {
@@ -236,23 +295,32 @@ export const useNotificationStore = defineStore('notifications', () => {
     saveEphemeralCache(ephemeral.value)
   }
 
-  async function fetchAll(): Promise<void> {
-    if (!auth.state.accessToken || auth.isStaff || auth.isAdmin || isDemoMode()) {
-      sellerPending.value = []
-      buyerPending.value = []
-      return
-    }
-
+  function fetchAll(): Promise<void> {
+    if (!canRead()) return Promise.resolve()
+    if (activeBatch) return activeBatch
+    stopPolling()
+    const batchGeneration = generation
+    const batchToken = auth.state.accessToken
+    const batchUserId = auth.state.user?.userId
     loading.value = true
-    try {
-      await Promise.all([
-        fetchSellerPending(),
-        fetchBuyerPending(),
-      ])
-      lastFetch.value = new Date()
-    } finally {
-      loading.value = false
-    }
+    const batch = Promise.all([fetchPending(true), fetchPending(false)])
+      .then(results => {
+        if (canRead() && batchGeneration === generation && batchToken === auth.state.accessToken &&
+          batchUserId === auth.state.user?.userId && results.every(Boolean) && !refreshQueued) lastFetch.value = new Date()
+      })
+      .finally(() => {
+        if (activeBatch !== batch) return
+        activeBatch = undefined
+        loading.value = false
+        if (refreshQueued) {
+          refreshQueued = false
+          void fetchAll()
+        } else {
+          startPolling()
+        }
+      })
+    activeBatch = batch
+    return batch
   }
 
   function handleTransferUpdate(payload: any): void {
@@ -293,7 +361,14 @@ export const useNotificationStore = defineStore('notifications', () => {
     }
 
     if (isBuyer || isSeller) {
-      void fetchAll()
+      // Events can supersede a response already in flight. Coalesce a burst into
+      // one follow-up read and prevent that older response restoring stale items.
+      revision += 1
+      if (activeBatch) refreshQueued = true
+      else {
+        invalidateRequests()
+        void fetchAll()
+      }
     }
   }
 
@@ -318,14 +393,39 @@ export const useNotificationStore = defineStore('notifications', () => {
   }
 
   function clearAll(): void {
+    invalidateRequests()
+    setListeners(false)
     sellerPending.value = []
     buyerPending.value = []
     ephemeral.value = []
+    lastFetch.value = null
     initialized.value = false
     realtimeConnected.value = false
     stopPolling()
     saveEphemeralCache([])
   }
+
+  watch(
+    () => [auth.state.accessToken, auth.state.user?.userId, auth.isStaff, auth.isAdmin, auth.isDemoSession] as const,
+    (next, previous) => {
+      invalidateRequests()
+      sellerPending.value = []
+      buyerPending.value = []
+      lastFetch.value = null
+      if (next[1] !== previous[1] || !eligible()) {
+        ephemeral.value = []
+        saveEphemeralCache([])
+      }
+      if (initialized.value) void fetchAll()
+    },
+  )
+
+  onScopeDispose(() => {
+    disposed = true
+    initialized.value = false
+    invalidateRequests()
+    setListeners(false)
+  })
 
   return {
     sellerPending,
