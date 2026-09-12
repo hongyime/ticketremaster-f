@@ -62,7 +62,9 @@ test.describe('Local State Persistence', () => {
     await page.route(`${api}/auth/logout`, route => route.fulfill({ json: { data: {} } }))
     await signIn(page)
     await page.evaluate(() => localStorage.setItem('favoriteEvents', '["evt_001"]'))
-    await page.goto('/profile')
+    // Exercise logout through normal in-app navigation. Reloading an outstanding
+    // request is covered by the dedicated login-persistence case above.
+    await page.getByRole('link', { name: 'Profile', exact: true }).click()
     await page.getByRole('button', { name: 'Log Out', exact: true }).click()
     await expect(page).toHaveURL('/login')
     expect(await page.evaluate(() => localStorage.getItem('access_token'))).toBeNull()
