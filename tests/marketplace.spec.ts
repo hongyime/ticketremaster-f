@@ -1,209 +1,58 @@
-import { test, expect } from '@playwright/test';
-import {
-    setupConsoleMonitoring,
-    assertNoConsoleErrors,
-} from './setup/console-monitor';
-
-const API_URL = '**/ticketremasterapi.hong-yi.me/**';
+import { test, expect, seedUser } from './setup/fixtures'
+const api = 'https://ticketremasterapi.invalid'
+const listings = [
+  { listingId: 'lst_001', ticketId: 'tkt_001', eventName: 'Taylor Swift', price: 300, sellerId: 'seller', status: 'ACTIVE', eventDate: '2030-06-15T19:00:00Z' },
+  { listingId: 'lst_002', ticketId: 'tkt_002', eventName: 'Coldplay', price: 100, sellerId: 'seller', status: 'ACTIVE', eventDate: '2030-06-16T19:00:00Z' },
+  { listingId: 'lst_003', ticketId: 'tkt_003', eventName: 'Jazz Night', price: 200, sellerId: 'seller', status: 'ACTIVE', eventDate: '2030-06-17T19:00:00Z' },
+]
 
 test.describe('Marketplace Flow', () => {
-    test.beforeEach(async ({ page, context }) => {
-        setupConsoleMonitoring(page);
-        await context.addInitScript(() => {
-            localStorage.setItem('access_token', 'mock-token');
-            localStorage.setItem('refresh_token', 'refresh-token');
-            localStorage.setItem('user', JSON.stringify({ userId: 'usr_001', email: 'buyer@example.com', role: 'user' }));
-        });
-    });
-
-    test.afterEach(async () => {
-        assertNoConsoleErrors();
-    });
-
-    test('should show active listings', async ({ page }) => {
-        await page.route(API_URL, async route => {
-            const url = route.request().url();
-            if (url.includes('/marketplace')) {
-                await route.fulfill({
-                    status: 200,
-                    contentType: 'application/json',
-                    body: JSON.stringify({
-                        data: {
-                            listings: [{
-                                listingId: 'lst_001',
-                                ticketId: 'tkt_001',
-                                price: 500,
-                                status: 'ACTIVE',
-                                sellerId: 'usr_seller',
-                                eventName: 'Taylor Swift',
-                                eventDate: '2026-06-15T19:00:00Z',
-                                rowNumber: 'A',
-                                seatNumber: 1
-                            }]
-                        }
-                    })
-                });
-            } else {
-                await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ data: {} }) });
-            }
-        });
-
-        await page.goto('/marketplace');
-        await expect(page.locator('h1')).toContainText(/Discover Listings|Marketplace/, { timeout: 10000 });
-        await expect(page.locator('h3.event-name:has-text("Taylor Swift")')).toBeVisible({ timeout: 10000 });
-    });
-
-    test('should allow buying a listing', async ({ page }) => {
-        await page.route(API_URL, async route => {
-            const url = route.request().url();
-            if (url.includes('/marketplace') && route.request().method() === 'POST') {
-                await route.fulfill({
-                    status: 200,
-                    contentType: 'application/json',
-                    body: JSON.stringify({ data: { transferId: 'txr_001', status: 'PENDING' } })
-                });
-            } else if (url.includes('/marketplace')) {
-                await route.fulfill({
-                    status: 200,
-                    contentType: 'application/json',
-                    body: JSON.stringify({
-                        data: {
-                            listings: [{
-                                listingId: 'lst_001',
-                                ticketId: 'tkt_001',
-                                price: 200,
-                                status: 'ACTIVE',
-                                sellerId: 'usr_seller',
-                                eventName: 'Concert A'
-                            }]
-                        }
-                    })
-                });
-            } else {
-                await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ data: {} }) });
-            }
-        });
-
-        await page.goto('/marketplace');
-        await expect(page.locator('h3.event-name:has-text("Concert A")')).toBeVisible({ timeout: 10000 });
-
-        const buyBtn = page.locator('button:has-text("Buy")').first();
-        if (await buyBtn.count() > 0) {
-            await buyBtn.click();
-            await page.waitForTimeout(1000);
-        }
-    });
-
-    test('should handle buying with insufficient credits (402)', async ({ page }) => {
-        await page.route(API_URL, async route => {
-            const url = route.request().url();
-            if (url.includes('/transfer/initiate') && route.request().method() === 'POST') {
-                await route.fulfill({
-                    status: 402,
-                    contentType: 'application/json',
-                    body: JSON.stringify({ error: { code: 'INSUFFICIENT_CREDITS', message: 'Not enough credits' } })
-                });
-            } else if (url.includes('/marketplace')) {
-                await route.fulfill({
-                    status: 200,
-                    contentType: 'application/json',
-                    body: JSON.stringify({
-                        data: {
-                            listings: [{
-                                listingId: 'lst_001',
-                                ticketId: 'tkt_001',
-                                price: 9999,
-                                status: 'ACTIVE',
-                                sellerId: 'usr_seller',
-                                eventName: 'Expensive Concert'
-                            }]
-                        }
-                    })
-                });
-            } else {
-                await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ data: {} }) });
-            }
-        });
-
-        await page.goto('/marketplace');
-        await expect(page.locator('h3.event-name:has-text("Expensive Concert")')).toBeVisible({ timeout: 10000 });
-
-        const buyBtn = page.locator('button:has-text("Buy")').first();
-        if (await buyBtn.count() > 0) {
-            await buyBtn.click();
-            const toast = page.locator('.toast.error').first();
-            await expect(toast).toBeVisible({ timeout: 10000 });
-        }
-    });
-
-    test('should filter listings by search', async ({ page }) => {
-        await page.route(API_URL, async route => {
-            const url = route.request().url();
-            if (url.includes('/marketplace')) {
-                await route.fulfill({
-                    status: 200,
-                    contentType: 'application/json',
-                    body: JSON.stringify({
-                        data: {
-                            listings: [
-                                { listingId: 'lst_001', ticketId: 'tkt_001', price: 350, status: 'ACTIVE', eventName: 'Taylor Swift' },
-                                { listingId: 'lst_002', ticketId: 'tkt_002', price: 200, status: 'ACTIVE', eventName: 'Ed Sheeran' }
-                            ]
-                        }
-                    })
-                });
-            } else {
-                await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ data: {} }) });
-            }
-        });
-
-        await page.goto('/marketplace');
-        await expect(page.locator('h3.event-name:has-text("Taylor Swift")')).toBeVisible({ timeout: 10000 });
-
-        const searchInput = page.locator('input[placeholder*="search" i], input[placeholder*="Search"]').first();
-        if (await searchInput.count() > 0) {
-            await searchInput.fill('Taylor Swift');
-            await page.waitForTimeout(300);
-            await expect(page.locator('h3.event-name:has-text("Taylor Swift")')).toBeVisible();
-            await expect(page.locator('h3.event-name:has-text("Ed Sheeran")')).not.toBeVisible();
-        } else {
-            await expect(page.locator('text=Taylor Swift')).toBeVisible();
-        }
-    });
-
-    test('should sort listings by price', async ({ page }) => {
-        await page.route(API_URL, async route => {
-            const url = route.request().url();
-            if (url.includes('/marketplace')) {
-                await route.fulfill({
-                    status: 200,
-                    contentType: 'application/json',
-                    body: JSON.stringify({
-                        data: {
-                            listings: [
-                                { listingId: 'lst_001', ticketId: 'tkt_001', price: 500, status: 'ACTIVE', eventName: 'Concert A' },
-                                { listingId: 'lst_002', ticketId: 'tkt_002', price: 200, status: 'ACTIVE', eventName: 'Concert B' },
-                                { listingId: 'lst_003', ticketId: 'tkt_003', price: 350, status: 'ACTIVE', eventName: 'Concert C' }
-                            ]
-                        }
-                    })
-                });
-            } else {
-                await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ data: {} }) });
-            }
-        });
-
-        await page.goto('/marketplace');
-        await expect(page.locator('h3.event-name:has-text("Concert A")')).toBeVisible({ timeout: 10000 });
-
-        const priceBtn = page.locator('button:has-text("Price")').first();
-        if (await priceBtn.count() > 0) {
-            await priceBtn.click();
-            await page.waitForTimeout(300);
-        }
-
-        await expect(page.locator('h3.event-name:has-text("Concert A")')).toBeVisible();
-        await expect(page.locator('h3.event-name:has-text("Concert B")')).toBeVisible();
-        await expect(page.locator('h3.event-name:has-text("Concert C")')).toBeVisible();
-    });
-});
+  test.beforeEach(async ({ page, context }) => {
+    await seedUser(context)
+    await page.route(`${api}/marketplace?*`, route => route.fulfill({ json: { data: { listings, pagination: { total: 3 } } } }))
+  })
+  test('should show active listings', async ({ page }) => {
+    await page.goto('/marketplace')
+    await expect(page.getByRole('heading', { level: 1 })).toHaveText('Authentic Access.')
+    await expect(page.locator('.listing-card h3')).toHaveText(['Taylor Swift', 'Coldplay', 'Jazz Night'])
+    await expect(page.locator('.listing-card .listing-price')).toHaveText(['SGD 300', 'SGD 100', 'SGD 200'])
+  })
+  test('should initiate a purchase and open buyer verification', async ({ page }) => {
+    const payloads: unknown[] = []
+    const transfer = { transferId: 'txr_001', status: 'pending_buyer_otp', buyerId: 'usr_001', sellerId: 'seller', buyerVerificationSid: 'VE_fixture', creditAmount: 300, eventName: 'Taylor Swift' }
+    await page.route(`${api}/transfer/initiate`, route => { payloads.push(route.request().postDataJSON()); return route.fulfill({ json: { data: transfer } }) })
+    await page.route(`${api}/transfer/txr_001`, route => route.fulfill({ json: { data: transfer } }))
+    await page.goto('/marketplace')
+    await page.locator('.listing-card').filter({ hasText: 'Taylor Swift' }).getByRole('button', { name: 'Buy Ticket' }).click()
+    await expect(page).toHaveURL('/transfer/txr_001')
+    await expect(page.locator('.otp-layout')).toBeVisible()
+    await expect(page.locator('.otp-event-name')).toHaveText('Taylor Swift')
+    expect(payloads).toEqual([{ listingId: 'lst_001' }])
+  })
+  test('should handle buying with insufficient credits (402)', async ({ page }) => {
+    let attempts = 0
+    await page.route(`${api}/transfer/initiate`, route => { attempts++; return route.fulfill({ status: 402, json: { error: { code: 'INSUFFICIENT_CREDITS', message: 'Not enough credits' } } }) })
+    await page.goto('/marketplace')
+    await page.locator('.listing-card').first().getByRole('button', { name: 'Buy Ticket' }).click()
+    await expect(page.locator('.toast.error').first()).toContainText('Not enough credits')
+    await expect(page).toHaveURL('/marketplace')
+    expect(attempts).toBe(1)
+  })
+  test('should filter listings by search', async ({ page }) => {
+    await page.goto('/marketplace')
+    await expect(page.locator('.listing-card h3')).toHaveCount(3)
+    await page.getByPlaceholder('Search events, artists, or venues...').fill('coldPLAY')
+    await expect(page.locator('.listing-card h3')).toHaveText(['Coldplay'])
+    await page.getByPlaceholder('Search events, artists, or venues...').fill('missing artist')
+    await expect(page.locator('.listing-card h3')).toHaveCount(0)
+    await expect(page.locator('.empty-card')).toContainText('No listings available')
+  })
+  test('should sort listings by price in both directions', async ({ page }) => {
+    await page.goto('/marketplace')
+    await expect(page.locator('.listing-card h3')).toHaveCount(3)
+    await page.getByRole('button', { name: /^Price/ }).click()
+    await expect(page.locator('.listing-card h3')).toHaveText(['Coldplay', 'Jazz Night', 'Taylor Swift'])
+    await page.getByRole('button', { name: /^Price/ }).click()
+    await expect(page.locator('.listing-card h3')).toHaveText(['Taylor Swift', 'Jazz Night', 'Coldplay'])
+  })
+})

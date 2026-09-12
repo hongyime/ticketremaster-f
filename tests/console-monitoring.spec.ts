@@ -1,9 +1,4 @@
-import { test, expect } from '@playwright/test';
-import {
-    setupConsoleMonitoring,
-    assertNoConsoleErrors,
-    getCollectedErrors,
-} from './setup/console-monitor';
+import { test, expect } from './setup/fixtures';
 
 /**
  * Browser Console Monitoring Tests
@@ -12,15 +7,6 @@ import {
  * during normal operation. Console monitoring is active for all tests.
  */
 test.describe('Browser Console Monitoring', () => {
-    test.beforeEach(async ({ page }) => {
-        // Setup console monitoring for this test
-        setupConsoleMonitoring(page);
-    });
-
-    test.afterEach(async () => {
-        // Assert no console errors occurred during the test
-        assertNoConsoleErrors();
-    });
 
     test('should have no console errors on landing page', async ({ page }) => {
         await page.goto('/');
@@ -32,12 +18,12 @@ test.describe('Browser Console Monitoring', () => {
         // Events page uses a toolbar with tabs, not an h1
         await expect(page.locator('.events-page')).toBeVisible();
         // Check for the All tab button
-        await expect(page.locator('button.tab:has-text("All")')).toBeVisible();
+        await expect(page.locator('button.filter-chip:has-text("All Categories")')).toBeVisible();
     });
 
     test('should have no console errors on login page', async ({ page }) => {
         await page.goto('/login');
-        await expect(page.locator('h1')).toContainText(/Login|Sign In/);
+        await expect(page.locator('h1')).toHaveText('Welcome Back');
     });
 
     test('should have no console errors on register page', async ({ page }) => {
@@ -47,7 +33,7 @@ test.describe('Browser Console Monitoring', () => {
 
     test('should have no console errors on demo login page', async ({ page }) => {
         await page.goto('/demo-login');
-        await expect(page.locator('h1')).toContainText(/Demo/);
+        await expect(page.locator('h1')).toHaveText('Select Your Persona');
     });
 
     test('should have no console errors on about page', async ({ page }) => {
@@ -57,7 +43,7 @@ test.describe('Browser Console Monitoring', () => {
 
     test('should have no console errors on help page', async ({ page }) => {
         await page.goto('/help');
-        await expect(page.locator('h1')).toContainText(/Help/);
+        await expect(page.locator('h1')).toHaveText(/Support\s*Center/);
     });
 
     test('should have no console errors on terms page', async ({ page }) => {

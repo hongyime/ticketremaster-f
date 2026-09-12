@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref } from 'vue'
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 
 const router = useRouter()
@@ -8,10 +8,13 @@ const route = useRoute()
 const secondsLeft = ref(0)
 const orderId = ref('')
 const eventName = ref('')
+const orderKey = ref('')
+const dismissedOrderKey = ref('')
 let ticker: number | undefined
 
 const visible = computed(() =>
   secondsLeft.value > 0 &&
+  orderKey.value !== dismissedOrderKey.value &&
   !String(route.path).startsWith('/checkout') &&
   !String(route.path).endsWith('/seats'),
 )
@@ -25,15 +28,16 @@ const timeDisplay = computed(() => {
 const loadFromStorage = () => {
   try {
     const raw = localStorage.getItem('pendingOrder')
-    if (!raw) { secondsLeft.value = 0; return }
+    if (!raw) { secondsLeft.value = 0; orderId.value = ''; orderKey.value = ''; return }
     const parsed = JSON.parse(raw)
     const heldUntil = parsed?.heldUntil
-    if (!heldUntil) { secondsLeft.value = 0; return }
-    const secs = Math.max(0, Math.floor((new Date(heldUntil).getTime() - Date.now()) / 1000))
+    if (!heldUntil || !Number.isFinite(new Date(heldUntil).getTime())) { secondsLeft.value = 0; return }
+    const secs = Math.max(0, Math.ceil((new Date(heldUntil).getTime() - Date.now()) / 1000))
     secondsLeft.value = secs
-    orderId.value = parsed?.orderId || ''
+    orderId.value = parsed?.orderId || parsed?.inventoryId || ''
+    orderKey.value = `${orderId.value}:${heldUntil}`
     eventName.value = parsed?.event?.name || 'your selected event'
-    if (secs === 0) localStorage.removeItem('pendingOrder')
+    if (secs === 0 && localStorage.getItem('pendingOrder') === raw) localStorage.removeItem('pendingOrder')
   } catch {
     secondsLeft.value = 0
   }
@@ -44,22 +48,32 @@ const resume = () => {
 }
 
 const dismiss = () => {
-  secondsLeft.value = 0
+  // Dismissing presentation must never cancel or delete the held seat.
+  dismissedOrderKey.value = orderKey.value
 }
 
-onMounted(() => {
+const resumeTimer = () => {
+  window.clearInterval(ticker)
   loadFromStorage()
-  ticker = window.setInterval(() => {
-    if (secondsLeft.value <= 0) {
-      clearInterval(ticker)
-      localStorage.removeItem('pendingOrder')
-      return
-    }
-    secondsLeft.value--
-  }, 1000)
+  if (document.visibilityState === 'visible') {
+    // Read the current order and its absolute expiry. A timer captured while the
+    // store was empty must not delete a reservation created later in the session.
+    ticker = window.setInterval(loadFromStorage, 1000)
+  }
+}
+
+watch(() => route.fullPath, loadFromStorage)
+onMounted(() => {
+  resumeTimer()
+  document.addEventListener('visibilitychange', resumeTimer)
+  window.addEventListener('storage', loadFromStorage)
 })
 
-onUnmounted(() => clearInterval(ticker))
+onUnmounted(() => {
+  window.clearInterval(ticker)
+  document.removeEventListener('visibilitychange', resumeTimer)
+  window.removeEventListener('storage', loadFromStorage)
+})
 </script>
 
 <template>

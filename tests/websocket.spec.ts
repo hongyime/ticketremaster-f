@@ -1,139 +1,58 @@
-import { test, expect } from '@playwright/test';
-import {
-    setupConsoleMonitoring,
-    assertNoConsoleErrors,
-} from './setup/console-monitor';
+import { test, expect, seedUser } from './setup/fixtures'
 
-/**
- * WebSocket Real-time Notification Tests
- * 
- * Tests the Socket.IO notification infrastructure for:
- * - seat_update events
- * - ticket_update events  
- * - transfer_update events
- * - purchase_update events
- */
-test.describe('WebSocket Real-time Notifications', () => {
-    test.beforeEach(async ({ page }) => {
-        setupConsoleMonitoring(page);
-    });
-
-    test.afterEach(async () => {
-        assertNoConsoleErrors();
-    });
-
-    async function loginDemoUser(page: any) {
-        await page.goto('/demo-login');
-        await page.click('button:has-text("Demo User")');
-        await page.waitForURL(/\/events/, { timeout: 15000 });
-    }
-
-    async function navigateInApp(page: any, path: string) {
-        await page.evaluate((nextPath) => {
-            window.history.pushState({}, '', nextPath);
-            window.dispatchEvent(new PopStateEvent('popstate'));
-        }, path);
-    }
-
-    test('should connect to WebSocket on authenticated pages', async ({ page }) => {
-        await loginDemoUser(page);
-        await navigateInApp(page, '/tickets');
-        
-        // Give WebSocket time to connect
-        await page.waitForTimeout(1000);
-        
-        // The page should load without errors
-        await expect(page.locator('.tickets-page')).toBeVisible();
-    });
-
-    test('should handle WebSocket reconnection', async ({ page }) => {
-        await loginDemoUser(page);
-        await navigateInApp(page, '/tickets');
-        await page.waitForTimeout(500);
-
-        // Simulate disconnection by navigating away and back
-        await navigateInApp(page, '/events');
-        await page.waitForTimeout(500);
-        await navigateInApp(page, '/tickets');
-        await page.waitForTimeout(500);
-
-        // Page should still function after navigation
-        await expect(page.locator('.tickets-page')).toBeVisible();
-    });
-});
-
-test.describe('Notification Event Types', () => {
-    test('seat_update event structure', async () => {
-        const seatUpdate = {
-            type: 'seat_update',
-            payload: {
-                eventId: 'evt_001',
-                seatId: 'seat_001',
-                inventoryId: 'inv_001',
-                status: 'sold',
-                previousStatus: 'held'
-            },
-            traceId: 'trace_abc123',
-            timestamp: new Date().toISOString()
-        };
-
-        expect(seatUpdate.type).toBe('seat_update');
-        expect(seatUpdate.payload).toHaveProperty('eventId');
-        expect(seatUpdate.payload).toHaveProperty('seatId');
-        expect(seatUpdate.payload).toHaveProperty('status');
-    });
-
-    test('ticket_update event structure', async () => {
-        const ticketUpdate = {
-            type: 'ticket_update',
-            payload: {
-                ticketId: 'tkt_001',
-                status: 'used',
-                previousStatus: 'active',
-                scannedAt: new Date().toISOString()
-            },
-            traceId: 'trace_def456',
-            timestamp: new Date().toISOString()
-        };
-
-        expect(ticketUpdate.type).toBe('ticket_update');
-        expect(ticketUpdate.payload).toHaveProperty('ticketId');
-        expect(ticketUpdate.payload).toHaveProperty('status');
-    });
-
-    test('transfer_update event structure', async () => {
-        const transferUpdate = {
-            type: 'transfer_update',
-            payload: {
-                transferId: 'txr_001',
-                status: 'completed',
-                previousStatus: 'pending_seller_otp',
-                completedAt: new Date().toISOString()
-            },
-            traceId: 'trace_ghi789',
-            timestamp: new Date().toISOString()
-        };
-
-        expect(transferUpdate.type).toBe('transfer_update');
-        expect(transferUpdate.payload).toHaveProperty('transferId');
-        expect(transferUpdate.payload).toHaveProperty('status');
-    });
-
-    test('purchase_update event structure', async () => {
-        const purchaseUpdate = {
-            type: 'purchase_update',
-            payload: {
-                inventoryId: 'inv_001',
-                ticketId: 'tkt_001',
-                status: 'completed',
-                userId: 'usr_001'
-            },
-            traceId: 'trace_jkl012',
-            timestamp: new Date().toISOString()
-        };
-
-        expect(purchaseUpdate.type).toBe('purchase_update');
-        expect(purchaseUpdate.payload).toHaveProperty('inventoryId');
-        expect(purchaseUpdate.payload).toHaveProperty('ticketId');
-    });
-});
+test.describe('WebSocket notification handling in the browser', () => {
+  test.beforeEach(async ({ context }) => seedUser(context))
+  test('should establish the connection and subscribe for the signed-in user', async ({ page, sockets }) => {
+    await page.goto('/notifications')
+    await expect.poll(() => sockets.subscriptions).toEqual(expect.arrayContaining(['transfer_update', 'ticket_update']))
+    expect(sockets.connections).toHaveLength(1)
+    await expect(page.getByRole('heading', { name: 'No pending notifications' })).toBeVisible()
+  })
+  test('should reconnect and restore subscriptions after a socket closes', async ({ page, sockets }) => {
+    await page.goto('/notifications')
+    await expect.poll(() => sockets.subscriptions.length).toBe(2)
+    await sockets.connections[0].close({ code: 1001, reason: 'Synthetic connection loss' })
+    await expect.poll(() => sockets.connections.length).toBe(2)
+    await expect.poll(() => sockets.subscriptions.filter(name => name === 'ticket_update').length).toBe(2)
+    sockets.connections[1].send('42' + JSON.stringify(['ticket_update', { payload: { ticketId: 'reconnected', ownerId: 'usr_001', eventName: 'Reconnect Concert' } }]))
+    await expect(page.locator('.notification-card')).toContainText('Reconnect Concert')
+  })
+  test('should render ticket updates only for the current owner', async ({ page, sockets }) => {
+    await page.goto('/notifications')
+    await expect.poll(() => sockets.subscriptions.length).toBe(2)
+    sockets.send('ticket_update', { payload: { ticketId: 'private', ownerId: 'someone-else', eventName: 'Another account' } })
+    sockets.send('ticket_update', { payload: { ticketId: 'owned', ownerId: 'usr_001', eventName: 'My Concert' } })
+    await expect(page.locator('.notification-card')).toHaveCount(1)
+    await expect(page.locator('.notification-card')).toContainText('My Concert')
+    await page.getByRole('button', { name: 'View tickets', exact: true }).click()
+    await expect(page).toHaveURL('/tickets')
+  })
+  test('should render a completed transfer for the current buyer', async ({ page, sockets }) => {
+    await page.goto('/notifications')
+    await expect.poll(() => sockets.subscriptions.length).toBe(2)
+    sockets.send('transfer_update', { transferId: 'transfer_1', buyerId: 'usr_001', sellerId: 'seller', status: 'completed', eventName: 'Transferred Concert' })
+    await expect(page.locator('.notification-card h2')).toHaveText('Transfer Complete')
+    await expect(page.locator('.notification-card')).toContainText('Transferred Concert')
+    await page.getByRole('button', { name: 'Dismiss', exact: true }).click()
+    await expect(page.locator('.notification-card')).toHaveCount(0)
+  })
+  test('seat updates should not appear as account completion notifications', async ({ page, sockets }) => {
+    await page.goto('/notifications')
+    await expect.poll(() => sockets.subscriptions.length).toBe(2)
+    sockets.send('seat_update', { payload: { inventoryId: 'inv_001', eventId: 'evt_001', status: 'sold' } })
+    // This subsequent message proves that the socket delivery queue was processed.
+    sockets.send('ticket_update', { payload: { ticketId: 'sentinel', ownerId: 'usr_001', eventName: 'Delivery sentinel' } })
+    await expect(page.locator('.notification-card')).toHaveCount(1)
+    await expect(page.locator('.notification-card')).toContainText('Delivery sentinel')
+  })
+  test('purchase messages alone should not issue a purchase confirmation', async ({ page, sockets }) => {
+    await page.goto('/notifications')
+    await expect.poll(() => sockets.subscriptions.length).toBe(2)
+    sockets.send('purchase_update', { inventoryId: 'inv_001', ticketId: 'not-authoritative', userId: 'usr_001', status: 'completed' })
+    sockets.send('ticket_update', { payload: { ticketId: 'sentinel', ownerId: 'usr_001', eventName: 'Delivery sentinel' } })
+    await expect(page.locator('.notification-card')).toHaveCount(1)
+    await expect(page.locator('.notification-card')).toContainText('Delivery sentinel')
+    await expect(page).toHaveURL('/notifications')
+    // Any purchase API call fails the global guard; the UI waits for authoritative results.
+  })
+})

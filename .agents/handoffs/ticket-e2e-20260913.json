@@ -1,0 +1,29 @@
+{
+  "at": "2026-09-12T22:53:00.451882+00:00",
+  "previous_turn_classification": "progress",
+  "base_head": "98e12d933388587ee9336cd3c91e755f8d87106b",
+  "tasks": [
+    {
+      "id": "inspect_workflow_and_browser_contracts",
+      "done": true
+    },
+    {
+      "id": "reproduce_failures_with_isolated_providers",
+      "done": true
+    },
+    {
+      "id": "repair_truthful_full_browser_validation",
+      "done": false
+    },
+    {
+      "id": "pass_hosted_checks_and_release",
+      "done": false
+    },
+    {
+      "id": "verify_production_preservation_and_update_reports",
+      "done": false
+    }
+  ],
+  "scope": "Repair existing complete TicketRemaster browser suite and failure reporting; use synthetic providers and transactions. Keep backend integration unverified until independently proven.",
+  "portfolio_complete": false
+}

@@ -34,6 +34,8 @@ const page = ref(1)
 const totalPages = ref(1)
 const search = ref((route.query.search as string) || '')
 const typeFilter = ref<EventType | 'all'>((route.query.type as EventType | 'all') || 'all')
+const fromDate = ref('')
+const toDate = ref('')
 const activeView = ref<'all' | 'upcoming' | 'favorites'>('all')
 const favoriteIds = ref<string[]>(JSON.parse(localStorage.getItem('favoriteEvents') || '[]'))
 
@@ -125,6 +127,12 @@ const visibleEvents = computed(() => {
   return events.value.filter((event) => {
     const text = `${event.name} ${event.venue?.name || ''}`.toLowerCase()
     if (needle && !text.includes(needle)) return false
+    const parsedDate = event.date ? new Date(event.date) : null
+    const date = parsedDate && Number.isFinite(parsedDate.getTime())
+      ? `${parsedDate.getFullYear()}-${String(parsedDate.getMonth() + 1).padStart(2, '0')}-${String(parsedDate.getDate()).padStart(2, '0')}`
+      : ''
+    if (fromDate.value && (!date || date < fromDate.value)) return false
+    if (toDate.value && (!date || date > toDate.value)) return false
     if (activeView.value === 'upcoming' && (event.date?.slice(0, 10) || '') < today) return false
     if (activeView.value === 'favorites' && !favoriteIds.value.includes(event.eventId)) return false
     return true
@@ -132,7 +140,7 @@ const visibleEvents = computed(() => {
 })
 
 const featuredEvent = computed(() => visibleEvents.value[0] || null)
-const secondaryEvents = computed(() => visibleEvents.value.slice(featuredEvent.value ? 1 : 0, 5))
+const secondaryEvents = computed(() => visibleEvents.value.slice(featuredEvent.value ? 1 : 0))
 
 const openEventDetails = (eventId: string) => {
   router.push(`/events/${eventId}`)
@@ -175,6 +183,11 @@ onMounted(load)
           <span class="search-icon" aria-hidden="true">⌕</span>
           <input v-model="search" placeholder="Search events, artists, or venues..." />
         </label>
+
+        <div class="date-filters">
+          <label>From date<input v-model="fromDate" type="date" aria-label="From date" /></label>
+          <label>To date<input v-model="toDate" type="date" aria-label="To date" /></label>
+        </div>
 
         <div class="chip-row">
           <button
@@ -222,6 +235,13 @@ onMounted(load)
         >
           <img v-if="featuredEvent.image" :src="featuredEvent.image" :alt="featuredEvent.name" />
           <div class="card-overlay"></div>
+          <button
+            class="favorite-toggle" type="button"
+            :aria-label="`Favorite ${featuredEvent.name}`"
+            :aria-pressed="favoriteIds.includes(featuredEvent.eventId)"
+            @click.stop="toggleFavorite(featuredEvent.eventId)"
+            @keyup.enter.stop @keyup.space.stop
+          >{{ favoriteIds.includes(featuredEvent.eventId) ? '♥' : '♡' }}</button>
           <div class="card-copy featured-copy">
             <div class="feature-topline">
               <span class="tag tag-primary">Featured</span>
@@ -246,9 +266,11 @@ onMounted(load)
           @keyup.space.prevent="openEventDetails(event.eventId)"
         >
           <div class="square-media">
-            <img v-if="event.image" :src="event.image" :alt="event.name" />
+            <img v-if="event.image" :src="event.image" :alt="event.name" loading="lazy" decoding="async" />
             <div class="card-overlay"></div>
-            <button class="favorite-toggle" type="button" @click.stop="toggleFavorite(event.eventId)">
+            <button class="favorite-toggle" type="button"
+              :aria-label="`Favorite ${event.name}`" :aria-pressed="favoriteIds.includes(event.eventId)"
+              @click.stop="toggleFavorite(event.eventId)" @keyup.enter.stop @keyup.space.stop>
               {{ favoriteIds.includes(event.eventId) ? '♥' : '♡' }}
             </button>
           </div>
@@ -328,6 +350,29 @@ onMounted(load)
   transform: translateY(-50%);
   color: rgba(255, 255, 255, 0.48);
   font-size: 1.1rem;
+}
+
+.date-filters {
+  display: flex;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
+.date-filters label {
+  display: grid;
+  gap: 0.35rem;
+  color: var(--textMuted);
+  font-size: 0.8rem;
+}
+
+.date-filters input {
+  width: 10.5rem;
+  padding: 0.65rem;
+  color-scheme: dark;
+  border: 1px solid var(--outlineSoft);
+  border-radius: 0.6rem;
+  background: var(--surface);
+  color: var(--text);
 }
 
 .chip-row {
@@ -423,6 +468,7 @@ onMounted(load)
 }
 
 .favorite-toggle {
+  z-index: 2;
   position: absolute;
   top: 0.9rem;
   right: 0.9rem;
