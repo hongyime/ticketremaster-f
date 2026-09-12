@@ -1,11 +1,7 @@
-# Browser workflow maintenance
+# Browser workflow release follow-up
 
-Current task: restore meaningful browser gates and repair reproduced frontend defects from main 98e12d9. Production has not changed yet.
+PR 188 is live at d05bd93. All 17 PR checks passed, including 134 cases in each browser (402 total), plus 44 local unit cases. Both production aliases pass 20 desktop/mobile frontend fixtures. All 26 deployed Vercel projects remain READY; the spare web project is undeployed.
 
-- Confirmed false-success CI: build/test errors were suppressed and Firefox/WebKit projects were absent. The replacement defines all three browsers, checks test types, fails on test/build errors and bounds jobs/report retention.
-- All 14 browser specs now exercise actual UI behavior against isolated synthetic API, Socket.IO and Stripe providers; no live transaction providers are called.
-- Repairs implemented: new reservation preservation, complete returned event pages, accessible favorites, calendar date controls, handled camera rejection, and bounded manual offline recovery.
-- Chromium covers 134 scenarios across a 133-pass full run and a corrected native-XHR deadline check. Firefox/WebKit first full run passed 258/268. Navigation cancellation, precise expiry and narrowly classified synthetic failures are repaired; the final focused cases are being rechecked. Hosted Chromium and Firefox each passed all 134 cases. The two hosted Safari failures were reproduced and now pass locally after using the earlier navigation event and an explicit abort deadline. Successful-asset preload timing advisories remain attached to browser reports.
-- Source and browser-test type checking plus workflow lint pass. All 44 unit cases pass on the final serial rerun; the previous concurrent dynamic-import timeout is recorded.
+The main-branch WebKit run reported one native access-control diagnostic during an unnecessary full-page navigation inside the logout test. The trace places it 42ms after navigation starts, before the next document. The logout case now uses the visible Profile link and normal SPA navigation; the separate reload-with-pending-XHR regression remains intact. No console exception allowance is added.
 
-Next: finish cross-browser verification and verify hosted gates and exact production commit, then publish PostPlan 67. No environment files or production data were changed. Backend transaction integration remains separately unverified. The full portfolio goal remains active.
+Next: verify the repeated logout case, all hosted checks and the final main run; publish PostPlan 67 and preservation evidence. Production application code, providers and records are unchanged by this follow-up. Backend transaction integration and the full portfolio remain open.
