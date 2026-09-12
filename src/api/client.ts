@@ -27,6 +27,7 @@ const apiKey: string = import.meta.env.VITE_KONG_API_KEY || ''
 // A browser cancels pending requests when navigating away. That is not an outage
 // and must not replace a saved login with an offline demo account.
 let pageLeaving = false
+window.addEventListener('beforeunload', () => { pageLeaving = true })
 window.addEventListener('pagehide', () => { pageLeaving = true })
 window.addEventListener('pageshow', () => { pageLeaving = false })
 

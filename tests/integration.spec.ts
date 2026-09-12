@@ -278,12 +278,13 @@ test.describe('Transfer Flow with OTP Rate Limiting', () => {
     test('should complete the transfer after seller verification', async ({ page }) => {
         await seedAuthSession(page, 'usr_002', 'seller@example.com');
         await stubTransferShellRequests(page);
+        let completed = false;
 
         await page.context().route('https://ticketremasterapi.invalid/transfer/txr_005', async route => {
             await fulfillTransferApi(route, {
                 data: {
                     transferId: 'txr_005',
-                    status: 'pending_seller_otp',
+                    status: completed ? 'completed' : 'pending_seller_otp',
                     buyerId: 'usr_001',
                     sellerId: 'usr_002',
                     buyerOtpVerified: true,
@@ -297,6 +298,8 @@ test.describe('Transfer Flow with OTP Rate Limiting', () => {
         });
 
         await page.context().route('https://ticketremasterapi.invalid/transfer/txr_005/seller-verify', async route => {
+            expect(route.request().postDataJSON()).toEqual({ otp: '654321' });
+            completed = true;
             await route.fulfill({
                 status: 200,
                 contentType: 'application/json',

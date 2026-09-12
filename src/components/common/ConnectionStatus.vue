@@ -11,16 +11,20 @@ const offline = ref(Boolean((window as unknown as Record<string, unknown>).__api
 const message = ref('Backend unavailable. Showing demo data while live services recover.')
 const retrying = ref(false)
 const retryError = ref('')
+let retryController: AbortController | null = null
 const RETRY_REQUEST = { params: { limit: 1 }, timeout: 8000, skipRetry: true, suppressErrorToast: true, suppressErrorLog: true }
 
 const retryConnection = async () => {
   if (retrying.value) return
   retrying.value = true
   retryError.value = ''
+  const controller = new AbortController()
+  retryController = controller
+  const deadline = window.setTimeout(() => controller.abort(), 8000)
   const wasOfflineAccount = sessionStorage.getItem('demo_context') === 'offline'
   try {
     // One user-initiated probe, with an eight-second deadline and no automatic retries.
-    await api.get('/events', RETRY_REQUEST)
+    await api.get('/events', { ...RETRY_REQUEST, signal: controller.signal })
     setDemoMode(false)
     sessionStorage.removeItem(DISMISS_KEY)
     window.dispatchEvent(new Event('api:online'))
@@ -28,6 +32,8 @@ const retryConnection = async () => {
   } catch {
     retryError.value = 'The service is still unavailable. Please try again later.'
   } finally {
+    window.clearTimeout(deadline)
+    if (retryController === controller) retryController = null
     retrying.value = false
   }
 }
@@ -59,6 +65,7 @@ onMounted(() => {
 })
 
 onUnmounted(() => {
+  retryController?.abort()
   window.removeEventListener('api:online', handleOnline)
   window.removeEventListener('api:offline', handleOffline as EventListener)
 })

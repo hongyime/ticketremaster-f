@@ -8,7 +8,9 @@ export function monitorConsole(context: BrowserContext) {
   const messages: BrowserMessage[] = []
   let failedApiRequest = false
   const loadedAssets = new Set<string>()
-  const isApi = (url: string) => new URL(url).hostname === 'ticketremasterapi.invalid'
+  const isApi = (url: string) => {
+    try { return new URL(url).origin === 'https://ticketremasterapi.invalid' } catch { return false }
+  }
   context.on('response', response => {
     if (isApi(response.url()) && response.status() >= 400) failedApiRequest = true
     if (response.ok() && /^http:\/\/127\.0\.0\.1:43187\/assets\/[^?#]+\.(?:js|css)$/.test(response.url())) loadedAssets.add(response.url())
@@ -32,7 +34,8 @@ export function monitorConsole(context: BrowserContext) {
     if (item.message === 'Service Worker registration blocked by Playwright') return false
     if (failedApiRequest && /^API (?:error|request rejected)\b/.test(item.message)) return false
     if (failedApiRequest && /^(?:AxiosError|Error: Request failed with status code)/.test(item.message)) return false
-    if (failedApiRequest && /^\[JavaScript Error: "Cross-Origin Request Blocked:/.test(item.message) && item.message.includes('https://ticketremasterapi.invalid/') && item.message.includes('(Reason: CORS request did not succeed). Status code: (null).')) return false
+    const corsResource = /^\[JavaScript Error: "Cross-Origin Request Blocked: The Same Origin Policy disallows reading the remote resource at (https:\/\/\S+)\. \(Reason: CORS request did not succeed\)\. Status code: \(null\)\."\]$/.exec(item.message)
+    if (failedApiRequest && corsResource && isApi(corsResource[1]!)) return false
     const apiResource = !item.url || isApi(item.url)
     if (failedApiRequest && apiResource && /Failed to load resource|net::ERR_|NS_ERROR_/.test(item.message)) return false
     return true
