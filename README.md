@@ -21,6 +21,7 @@ A modern, responsive Vue 3 frontend for the TicketRemaster ticketing platform.
 
 ### Real-time Features
 - **WebSocket Updates** — Live seat availability and purchase notifications
+- **Notification read budget** — Visible, online customer sessions use a 30-second fallback after each completed refresh when realtime is disconnected. Hidden/offline tabs pause HTTP notification reads and catch up on return. Overlapping refreshes share requests; logout/account changes cancel old reads. This changes notification reads only, not transfer, reservation or QR deadlines. Run `npm run test:notifications` for the lifecycle contract.
 - **Session Replay** — Sentry session recording for debugging
 - **Performance Monitoring** — Automatic performance tracking
 

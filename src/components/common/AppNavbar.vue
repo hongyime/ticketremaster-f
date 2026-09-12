@@ -100,7 +100,6 @@ const isActive = (target: string) => route.path === target || route.path.startsW
 watch(() => auth.isLoggedIn, () => {
   if (auth.isLoggedIn) {
     scheduleBalance()
-    if (showNotifications.value) void notificationStore.fetchAll()
   }
 })
 
@@ -112,7 +111,6 @@ watch(() => route.fullPath, () => {
 onMounted(() => {
   if (auth.isLoggedIn) {
     scheduleBalance()
-    if (showNotifications.value) void notificationStore.fetchAll()
   }
 })
 

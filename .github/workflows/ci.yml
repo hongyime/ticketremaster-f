@@ -23,6 +23,7 @@ on:
       - "tailwind.config.*"
       - "vite.config.*"
       - "tsconfig*.json"
+      - ".github/workflows/ci.yml"
 
 concurrency:
   group: build-${{ github.workflow }}-${{ github.ref }}
@@ -87,6 +88,12 @@ jobs:
       - name: Run build
         if: steps.detect.outputs.has_build == 'true'
         run: ${{ steps.detect.outputs.pm == 'npm' && 'npm run build' || format('{0} run build', steps.detect.outputs.pm) }}
+
+      - name: Check application types
+        run: npm run typecheck
+
+      - name: Verify notification request lifecycle
+        run: npm run test:notifications
 
       - name: Build succeeded
         if: steps.detect.outputs.has_build == 'true'
