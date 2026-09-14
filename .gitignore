@@ -68,6 +68,10 @@ stitch_exports/
 .env*
 
 
+
+# Isolated browser fixture build
+/dist-e2e/
+
 # AI / editor dot directories (managed via sourcerepo)
 .*
 !.github/
@@ -103,6 +107,3 @@ skills/
 skills-lock.json
 docs/
 # End AI / editor dot directories (managed via sourcerepo)
-
-# Isolated browser fixture build
-/dist-e2e/
