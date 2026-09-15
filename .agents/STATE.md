@@ -1,7 +1,7 @@
-# Browser workflow release follow-up
+# API diagnostic privacy
 
-PR 188 is live at d05bd93. All 17 PR checks passed, including 134 cases in each browser (402 total), plus 44 local unit cases. Both production aliases pass 20 desktop/mobile frontend fixtures. All 26 deployed Vercel projects remain READY; the spare web project is undeployed.
+Branch `fix/api-error-logging` targets `main`. Synthetic failures reproduced private request/response values in console diagnostics and retry URLs; retries also ignored the silent-log option. Keep only recognized HTTP method/status and numeric retry metadata. Five view handlers now log constant context without raw API errors.
 
-The main-branch WebKit run reported one native access-control diagnostic during an unnecessary full-page navigation inside the logout test. The trace places it 42ms after navigation starts, before the next document. The logout case now uses the visible Profile link and normal SPA navigation; the separate reload-with-pending-XHR regression remains intact. No console exception allowance is added.
+Validation: the original implementation failed 11 privacy regressions. All 40 focused API/notification unit cases, application and browser-test type checks, the production build, and two local Chromium login failure/retry scenarios now pass. Request payloads, user-facing errors, session rules and retry policy are preserved. CI now includes the API regression suite.
 
-Next: verify the repeated logout case, all hosted checks and the final main run; publish PostPlan 67 and preservation evidence. Production application code, providers and records are unchanged by this follow-up. Backend transaction integration and the full portfolio remain open.
+Next: pass all required hosted workflows, release, and verify both production aliases with intercepted synthetic providers. Backend transaction integration, telemetry configuration and the full portfolio remain open. Bundle-report build optimization is a separate focused change.

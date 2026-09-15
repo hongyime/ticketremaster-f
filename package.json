@@ -11,6 +11,7 @@
     "preview": "vite preview",
     "typecheck": "vue-tsc --noEmit",
     "test:notifications": "vitest run src/stores/__tests__/notifications.spec.ts",
+    "test:api": "vitest run src/api/__tests__/client.spec.ts",
     "test": "playwright test",
     "test:ui": "playwright test --ui",
     "test:types": "tsc --noEmit -p tsconfig.e2e.json"

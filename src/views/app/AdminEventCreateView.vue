@@ -34,7 +34,7 @@ onMounted(async () => {
     venues.value = data?.venues || data?.data?.venues || []
   } catch (e) {
     venues.value = mockVenues
-    console.error('Failed to load venues', e)
+    console.error('Failed to load venues')
   }
 })
 
