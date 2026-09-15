@@ -160,7 +160,7 @@ onMounted(async () => {
         venue: fallback.venue as Venue,
       })
     } else {
-      console.error('Failed to load ticket:', error)
+      console.error('Failed to load ticket')
     }
   } finally {
     loading.value = false

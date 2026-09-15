@@ -168,7 +168,7 @@ const releaseHold = async () => {
     const holdToken = parsed?.holdToken || ''
     await api.delete(`/purchase/hold/${inventoryId}`, { data: { holdToken } })
   } catch (error) {
-    console.error('Failed to release hold:', error)
+    console.error('Failed to release hold')
   }
   localStorage.removeItem('pendingOrder')
 }

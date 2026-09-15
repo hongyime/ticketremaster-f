@@ -18,6 +18,7 @@ A modern, responsive Vue 3 frontend for the TicketRemaster ticketing platform.
 - **i18n Support** — Internationalization (English, Spanish, French)
 - **Accessibility** — WCAG 2.1 AA compliant with focus traps and screen reader support
 - **Observability** — Sentry error tracking and PostHog analytics
+- **API diagnostics** — Failed requests log only the HTTP method and numeric status; retries add attempt and delay metadata. Request bodies, URLs, headers and provider response payloads stay out of these logs. Silent background requests also suppress retry logs. Run `npm run test:api` for the regression checks.
 
 ### Real-time Features
 - **WebSocket Updates** — Live seat availability and purchase notifications

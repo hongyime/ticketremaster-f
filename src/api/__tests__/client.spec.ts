@@ -5,6 +5,8 @@ import type { InternalAxiosRequestConfig, AxiosResponseHeaders } from 'axios'
 const toastPush = vi.fn()
 const clearSession = vi.fn()
 const consoleError = vi.fn()
+const consoleWarn = vi.fn()
+const consoleLog = vi.fn()
 const setDemoMode = vi.fn()
 
 vi.mock('@/stores/auth', () => ({
@@ -81,14 +83,19 @@ describe('api client silent background requests', () => {
     toastPush.mockReset()
     clearSession.mockReset()
     consoleError.mockReset()
+    consoleWarn.mockReset()
+    consoleLog.mockReset()
     setDemoMode.mockReset()
     vi.spyOn(console, 'error').mockImplementation(consoleError)
+    vi.spyOn(console, 'warn').mockImplementation(consoleWarn)
+    vi.spyOn(console, 'log').mockImplementation(consoleLog)
     api.defaults.adapter = async (config) => {
       throw createTransferNotFoundError(config)
     }
   })
 
   afterEach(() => {
+    vi.useRealTimers()
     vi.restoreAllMocks()
   })
 
@@ -102,7 +109,7 @@ describe('api client silent background requests', () => {
     await expect(api.get('/transfer/my-pending')).rejects.toBeInstanceOf(AxiosError)
 
     expect(toastPush).toHaveBeenCalledWith('Transfer not found.', 'error')
-    expect(consoleError).toHaveBeenCalled()
+    expect(consoleWarn).toHaveBeenCalled()
   })
 
   it('suppresses console logging for silent background polling requests', async () => {
@@ -111,6 +118,8 @@ describe('api client silent background requests', () => {
     ).rejects.toBeInstanceOf(AxiosError)
 
     expect(consoleError).not.toHaveBeenCalled()
+    expect(consoleWarn).not.toHaveBeenCalled()
+    expect(consoleLog).not.toHaveBeenCalled()
   })
 
   it('does not retry 429 responses', async () => {
@@ -132,5 +141,73 @@ describe('api client silent background requests', () => {
     await expect(api.get('/transfer/demo-transfer-001')).rejects.toBeInstanceOf(AxiosError)
 
     expect(setDemoMode).not.toHaveBeenCalled()
+  })
+
+  const privateValue = 'SYNTHETIC_PRIVATE_PAYLOAD_67dcb'
+  const privateUrl = `/auth/login/${privateValue}?token=${privateValue}#${privateValue}`
+  function sensitiveFailure(config: InternalAxiosRequestConfig, status?: number) {
+    return new AxiosError(privateValue, privateValue, config, {}, status === undefined ? undefined : {
+      status,
+      statusText: privateValue,
+      config,
+      headers: { 'set-cookie': privateValue } as unknown as AxiosResponseHeaders,
+      data: { error: { code: privateValue, message: privateValue }, accessToken: privateValue },
+    })
+  }
+
+  it.each([400, 401, 403, 429, 500, 502, 503, 504, undefined])(
+    'keeps private request and response values out of status %s diagnostics', async (status) => {
+      let failure: AxiosError | undefined
+      api.defaults.adapter = async (config) => {
+        failure = sensitiveFailure(config, status)
+        throw failure
+      }
+      const result = await api.post(privateUrl, { password: privateValue, otp: privateValue }, {
+        headers: { apikey: privateValue, 'X-Private-Test': privateValue },
+        params: { credential: privateValue }, skipRetry: true,
+      } as any).catch(error => error)
+      expect(result).toBe(failure)
+      expect(JSON.stringify([consoleError.mock.calls, consoleWarn.mock.calls, consoleLog.mock.calls]))
+        .not.toContain(privateValue)
+      const sink = status !== undefined && status < 500 ? consoleWarn : consoleError
+      expect(sink).toHaveBeenCalledWith(
+        status !== undefined && status < 500 ? 'API request rejected' : 'API error',
+        { method: 'POST', status },
+      )
+      expect(clearSession).not.toHaveBeenCalled()
+    },
+  )
+
+  it.each([false, true])('keeps retries private with suppressErrorLog=%s', async (silent) => {
+    vi.useFakeTimers()
+    vi.spyOn(Math, 'random').mockReturnValue(0)
+    const adapter = vi.fn(async (config: InternalAxiosRequestConfig) => {
+      if (adapter.mock.calls.length === 1) throw sensitiveFailure(config, 503)
+      return { data: { ok: true }, status: 200, statusText: 'OK', headers: {}, config }
+    })
+    api.defaults.adapter = adapter
+    const request = api.get(privateUrl, { suppressErrorLog: silent } as any)
+    await vi.runAllTimersAsync()
+    expect((await request).data).toEqual({ ok: true })
+    expect(adapter).toHaveBeenCalledTimes(2)
+    expect(JSON.stringify([consoleError.mock.calls, consoleWarn.mock.calls, consoleLog.mock.calls]))
+      .not.toContain(privateValue)
+    if (silent) {
+      expect(consoleError).not.toHaveBeenCalled()
+      expect(consoleLog).not.toHaveBeenCalled()
+    } else {
+      expect(consoleLog).toHaveBeenCalledWith('API retry scheduled', {
+        method: 'GET', status: 503, attempt: 1, maxAttempts: 3, delayMs: 500,
+      })
+    }
+  })
+
+  it.each([NaN, 999, privateValue])('does not log unrecognized method/status values (%s)', async (status) => {
+    api.defaults.adapter = async (config) => { throw sensitiveFailure(config, status as number) }
+    await expect(api.request({ url: privateUrl, method: privateValue as any, skipRetry: true } as any))
+      .rejects.toBeInstanceOf(AxiosError)
+    expect(consoleError).toHaveBeenCalledWith('API error', { method: 'OTHER', status: undefined })
+    expect(JSON.stringify([consoleError.mock.calls, consoleWarn.mock.calls, consoleLog.mock.calls]))
+      .not.toContain(privateValue)
   })
 })

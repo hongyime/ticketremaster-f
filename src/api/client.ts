@@ -113,42 +113,24 @@ const resolveUrl = (config: InternalAxiosRequestConfig | AxiosRequestConfig): st
 
 interface ApiErrorDetails {
   method: string
-  url: string
   status?: number
-  errorCode?: string
-  message?: string
-  params?: unknown
-  data?: unknown
-  headers?: Record<string, string>
-  response?: unknown
+}
+
+// Do not copy Axios configuration or provider text into console diagnostics:
+// request bodies, headers, URLs and responses can contain credentials or OTPs.
+const requestDiagnostics = (config: AxiosRequestConfig, status?: number): ApiErrorDetails => {
+  const method = String(config.method || 'GET').toUpperCase()
+  return {
+    method: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'HEAD', 'OPTIONS'].includes(method) ? method : 'OTHER',
+    status: typeof status === 'number' && Number.isInteger(status) && status >= 100 && status <= 599 ? status : undefined,
+  }
 }
 
 const logApiError = (error: AxiosError<ApiError>) => {
   const config = error?.config || {} as InternalAxiosRequestConfig
   if ((config as InternalAxiosRequestConfigWithMetadata).suppressErrorLog) return
-  const configHeaders = (config as InternalAxiosRequestConfig)?.headers || {}
-  const headers = { ...(configHeaders as Record<string, string> || {}) }
-  if (headers.Authorization) delete headers.Authorization
-  const status = error?.response?.status
-  const errorCode =
-    error?.response?.data?.error?.code ||
-    error?.response?.data?.error_code
-  const message =
-    error?.response?.data?.error?.message ||
-    error?.response?.data?.message ||
-    error?.message || 'Unknown error'
-  const details: ApiErrorDetails = {
-    method: String((config as InternalAxiosRequestConfig)?.method || 'GET').toUpperCase(),
-    url: resolveUrl(config),
-    status,
-    errorCode,
-    message,
-    params: (config as InternalAxiosRequestConfig)?.params,
-    data: (config as InternalAxiosRequestConfig)?.data,
-    headers,
-    response: error?.response?.data,
-  }
-  if (status && status >= 400 && status < 500) {
+  const details = requestDiagnostics(config, error?.response?.status)
+  if (details.status && details.status >= 400 && details.status < 500) {
     console.warn('API request rejected', details)
     return
   }
@@ -284,8 +266,14 @@ api.interceptors.response.use(
       original.__retryCount = retryCount + 1
       const delay = calculateBackoff(retryCount)
       
-      // Log retry attempt for debugging
-      console.log(`Retry attempt ${retryCount + 1}/${MAX_RETRY_ATTEMPTS} for ${original.method} ${original.url} after ${delay}ms`)
+      if (!original.suppressErrorLog) {
+        console.log('API retry scheduled', {
+          ...requestDiagnostics(original, status),
+          attempt: retryCount + 1,
+          maxAttempts: MAX_RETRY_ATTEMPTS,
+          delayMs: delay,
+        })
+      }
       
       // Wait for backoff delay then retry
       await new Promise(resolve => setTimeout(resolve, delay))

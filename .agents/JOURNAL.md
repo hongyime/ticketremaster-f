@@ -13,3 +13,5 @@
 - 2026-09-13: Hosted Chromium/Firefox each passed 134 scenarios. Safari reproduced login loss before pagehide and a stalled native-XHR timeout; the earlier beforeunload guard and explicit abort deadline pass both regressions locally. A transfer fixture now returns completed state after successful verification. Replace substring URL matching with parsed-origin equality and pin the E2E action revisions after scanner review.
 
 - 2026-09-13: Production browser fixtures pass at both aliases. Main WebKit exposed an intermittent native access-control diagnostic during the logout test's full document navigation. Exercise that logout flow through the visible Profile link; retain the dedicated pending-XHR reload case and strict exception reporting. This follow-up changes test navigation only.
+
+- 2026-09-15: Synthetic API failures exposed request credentials, provider payloads and retry URLs in browser logs. Retain bounded HTTP method/status and retry counters only, honor silent retry logging, and remove five raw view-level error arguments. Preserve original errors and request behavior; add API and browser regressions without calling live providers.
