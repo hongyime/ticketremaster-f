@@ -150,7 +150,7 @@ const loadSeats = async () => {
       setSectionsFromSeats(result.seats)
       toast.push('Showing demo seat map.', 'info', 2800)
     } catch {
-      console.error(e)
+      console.error('Failed to load event or seats')
       toast.push('Failed to load seat map.', 'error', 3200)
     }
   } finally {
@@ -343,7 +343,7 @@ onMounted(async () => {
       if (e?.response?.status === 404) {
         localStorage.removeItem('pendingOrder')
       } else {
-        console.warn('Could not check for existing hold:', e?.message)
+        console.warn('Could not check for existing hold')
       }
     }
   }
