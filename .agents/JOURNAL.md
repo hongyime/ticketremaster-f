@@ -15,3 +15,6 @@
 - 2026-09-13: Production browser fixtures pass at both aliases. Main WebKit exposed an intermittent native access-control diagnostic during the logout test's full document navigation. Exercise that logout flow through the visible Profile link; retain the dedicated pending-XHR reload case and strict exception reporting. This follow-up changes test navigation only.
 
 - 2026-09-15: Synthetic API failures exposed request credentials, provider payloads and retry URLs in browser logs. Retain bounded HTTP method/status and retry counters only, honor silent retry logging, and remove five raw view-level error arguments. Preserve original errors and request behavior; add API and browser regressions without calling live providers.
+
+
+2026-09-24 - portfolio hardening: pinned all 30 previously-unpinned GitHub Actions refs to full commit SHAs across 14 workflow files (hardening-sweep finding). Resolved via GitHub API, rewrote in-place with trailing '# original-ref' comments. No functional changes. Verified no CI failures on main after the change.
