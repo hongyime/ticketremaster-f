@@ -5,3 +5,7 @@ Branch `fix/api-error-logging` targets `main`. Synthetic failures reproduced pri
 Validation: the original implementation failed 11 privacy regressions. All 40 focused API/notification unit cases, application and browser-test type checks, the production build, and two local Chromium login failure/retry scenarios now pass. Request payloads, user-facing errors, session rules and retry policy are preserved. CI now includes the API regression suite.
 
 Next: pass all required hosted workflows, release, and verify both production aliases with intercepted synthetic providers. Backend transaction integration, telemetry configuration and the full portfolio remain open. Bundle-report build optimization is a separate focused change.
+
+## Privacy maintenance - 2026-09-27
+
+Remove the optional personal security contact while retaining private vulnerability-reporting guidance. The narrow documentation patch is prepared from the current default branch; staged whitespace and the inherited identity hook are publication checks. Application behavior is unchanged.

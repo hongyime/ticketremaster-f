@@ -18,3 +18,5 @@
 
 
 2026-09-24 - portfolio hardening: pinned all 30 previously-unpinned GitHub Actions refs to full commit SHAs across 14 workflow files (hardening-sweep finding). Resolved via GitHub API, rewrote in-place with trailing '# original-ref' comments. No functional changes. Verified no CI failures on main after the change.
+
+- 2026-09-27: Remove the optional personal security contact and preserve private reporting guidance through a reviewed maintenance pull request.
